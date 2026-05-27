@@ -75,6 +75,3 @@ This project is open-source because it takes a community to build something that
 1. **Test on your hardware:** Install the APK on your specific head unit, break things, and submit Bug Reports in the [Issues tab](../../issues). 
 2. **Feature Requests:** Have a cool idea? Open a discussion.
 3. **Pull Requests:** See a bug you can fix or a feature you want to add? Fork the repo and submit a PR. *(Please check the issues tab first to see what is currently being worked on!)*
-
-### Quick Start for Developers:
-1. Clone the repository: (not yet)

@@ -78,5 +78,8 @@ dependencies {
     // JSON serialization
     implementation("com.google.code.gson:gson:2.13.1")
 
+    // Maps
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

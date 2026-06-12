@@ -134,7 +134,9 @@ class SettingsRepository(private val context: Context) {
                 vitalsAsBars     = prefs[Keys.VITALS_AS_BARS] ?: defaults.vitalsAsBars,
                 speedometerDigitalOnly = prefs[Keys.SPEEDOMETER_DIGITAL_ONLY] ?: defaults.speedometerDigitalOnly,
                 gradientDirection = prefs[Keys.GRADIENT_DIRECTION]?.let { runCatching { GradientDirection.valueOf(it) }.getOrNull() } ?: defaults.gradientDirection,
-                useCustomBackgroundColor = prefs[Keys.USE_CUSTOM_BG_COLOR] ?: defaults.useCustomBackgroundColor
+                useCustomBackgroundColor = prefs[Keys.USE_CUSTOM_BG_COLOR] ?: defaults.useCustomBackgroundColor,
+                showMap      = prefs[Keys.SHOW_MAP] ?: defaults.showMap,
+                mapProvider  = prefs[Keys.MAP_PROVIDER]?.let { runCatching { MapProvider.valueOf(it) }.getOrNull() } ?: defaults.mapProvider
             )
     }
 
@@ -191,6 +193,8 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.SPEEDOMETER_DIGITAL_ONLY] = s.speedometerDigitalOnly
             prefs[Keys.GRADIENT_DIRECTION] = s.gradientDirection.name
             prefs[Keys.USE_CUSTOM_BG_COLOR] = s.useCustomBackgroundColor
+            prefs[Keys.SHOW_MAP]      = s.showMap
+            prefs[Keys.MAP_PROVIDER]  = s.mapProvider.name
     }
 
     suspend fun resetToDefaults() {

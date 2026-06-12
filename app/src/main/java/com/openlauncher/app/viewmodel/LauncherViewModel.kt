@@ -34,6 +34,7 @@ import com.openlauncher.app.util.LocationCompassManager
 import com.openlauncher.app.util.LocationData
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import com.openlauncher.app.data.MapProvider
 
 class LauncherViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -219,6 +220,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 "VITALS"      -> copy(showVitals = true)
                 "TRIP_TRACKER" -> copy(showTripTracker = true)
                 "SOUNDBOARD"  -> copy(showSoundboard = true)
+                "MAP" -> copy(showMap = true)
                 else          -> this
             }
             val idx       = layout.indexOfFirst { it.id == id }
@@ -238,6 +240,12 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun toggleMapProvider() {
+        updateSettings {
+            copy(mapProvider = if (mapProvider == MapProvider.OSM) MapProvider.GOOGLE else MapProvider.OSM)
+        }
+    }
+
     fun removeWidget(id: String) {
         updateSettings {
             when (id) {
@@ -250,6 +258,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 "VITALS"      -> copy(showVitals = false)
                 "TRIP_TRACKER" -> copy(showTripTracker = false)
                 "SOUNDBOARD"  -> copy(showSoundboard = false)
+                "MAP" -> copy(showMap = false)
                 else          -> this
             }
         }

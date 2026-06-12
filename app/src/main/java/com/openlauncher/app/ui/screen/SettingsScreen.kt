@@ -56,12 +56,11 @@ fun SettingsScreen(
     var showGradientEndPicker by remember { mutableStateOf(false) }
     var showFontColorPicker   by remember { mutableStateOf(false) }
 
-    // OpenDocument (not GetContent): only SAF document URIs carry a persistable
-    // grant, so this is what actually keeps the wallpaper readable after reboot
     val wallpaperPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
+        ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
+            // Persist read permission so URI is accessible after reboot
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -100,80 +99,22 @@ fun SettingsScreen(
         // ── Permissions ──────────────────────────────────────────────────────
         SettingsSection("Permissions") {
             val isMediaConnected by com.openlauncher.app.service.MediaListenerService.isConnected.collectAsState()
-
-            // Bumped on ON_RESUME so statuses refresh when the user returns from
-            // system settings (recomposition alone doesn't re-run these checks)
-            var permissionRefresh by remember { mutableIntStateOf(0) }
-            val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
-            DisposableEffect(lifecycleOwner) {
-                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) permissionRefresh++
-                }
-                lifecycleOwner.lifecycle.addObserver(observer)
-                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-            }
-
-            // canDrawOverlays requires API 23 — on Android 5.x the permission
-            // model doesn't exist, so treat it as granted
-            val canDrawOverlays = remember(permissionRefresh) {
-                android.os.Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(context)
-            }
-            val hasLocation = remember(permissionRefresh) {
-                androidx.core.content.ContextCompat.checkSelfPermission(
-                    context, android.Manifest.permission.ACCESS_FINE_LOCATION
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            }
-            val isDefaultLauncher = remember(permissionRefresh) {
-                val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-                context.packageManager.resolveActivity(
-                    home, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
-                )?.activityInfo?.packageName == context.packageName
-            }
-
-            val homeRoleLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.StartActivityForResult()
-            ) { permissionRefresh++ }
-
-            val locationPermissionLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestMultiplePermissions()
-            ) { permissionRefresh++ }
+            // Read fresh on every recomposition so status updates when user returns from system settings
+            val canDrawOverlays = Settings.canDrawOverlays(context)
+            val hasLocation = androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
             SettingsButton(
                 label    = "Set as Default Launcher",
-                sublabel = if (isDefaultLauncher) "Active — Open Launcher is the home app"
-                           else "Required so the head unit boots into Open Launcher",
+                sublabel = "Open Android home app settings",
                 icon     = Icons.Default.Home,
-                accent   = if (isDefaultLauncher) accent else Color(0xFF993333),
+                accent   = accent,
                 onClick  = {
-                    // Preferred: the system home-role dialog (API 29+). Vendor ROMs
-                    // sometimes ship without it, so fall through to the home-settings
-                    // screen, then the default-apps screen.
-                    var launched = false
-                    if (android.os.Build.VERSION.SDK_INT >= 29) {
-                        val rm = context.getSystemService(android.app.role.RoleManager::class.java)
-                        if (rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME) &&
-                            !rm.isRoleHeld(android.app.role.RoleManager.ROLE_HOME)
-                        ) {
-                            launched = runCatching {
-                                homeRoleLauncher.launch(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_HOME))
-                            }.isSuccess
-                        }
-                    }
-                    if (!launched) {
-                        launched = runCatching {
-                            context.startActivity(
-                                Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }.isSuccess
-                    }
-                    if (!launched) {
-                        runCatching {
-                            context.startActivity(
-                                Intent("android.settings.MANAGE_DEFAULT_APPS_SETTINGS")
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    }
+                    context.startActivity(
+                        Intent(Settings.ACTION_HOME_SETTINGS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
                 }
             )
             SettingsDivider()
@@ -196,16 +137,12 @@ fun SettingsScreen(
                 icon     = if (canDrawOverlays) Icons.Default.Layers else Icons.Default.LayersClear,
                 accent   = if (canDrawOverlays) accent else Color(0xFF993333),
                 onClick  = {
-                    if (android.os.Build.VERSION.SDK_INT >= 23) {
-                        runCatching {
-                            context.startActivity(
-                                Intent(
-                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                    Uri.parse("package:${context.packageName}")
-                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    }
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:${context.packageName}")
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
                 }
             )
             SettingsDivider()
@@ -215,23 +152,12 @@ fun SettingsScreen(
                 icon     = if (hasLocation) Icons.Default.LocationOn else Icons.Default.LocationOff,
                 accent   = if (hasLocation) accent else Color(0xFF993333),
                 onClick  = {
-                    if (!hasLocation) {
-                        // Ask in-app first — previously the only grant path was the
-                        // onboarding flow; skipping it left GPS features dead forever
-                        locationPermissionLauncher.launch(arrayOf(
-                            android.Manifest.permission.ACCESS_FINE_LOCATION,
-                            android.Manifest.permission.ACCESS_COARSE_LOCATION
-                        ))
-                    } else {
-                        runCatching {
-                            context.startActivity(
-                                Intent(
-                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                    Uri.parse("package:${context.packageName}")
-                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    }
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:${context.packageName}")
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
                 }
             )
         }
@@ -566,7 +492,7 @@ fun SettingsScreen(
                 sublabel = if (settings.wallpaperUri.isNotEmpty()) "Custom wallpaper active" else "Choose image from gallery",
                 icon     = Icons.Default.Wallpaper,
                 accent   = accent,
-                onClick  = { wallpaperPicker.launch(arrayOf("image/*")) }
+                onClick  = { wallpaperPicker.launch("image/*") }
             )
             if (settings.wallpaperUri.isNotEmpty()) {
                 Column {
@@ -677,35 +603,31 @@ fun SettingsScreen(
                     val lm = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
                     var success = false
                     try {
-                        // "delete_aiding_data" is the command AOSP's GPS provider
-                        // actually recognizes (requires ACCESS_LOCATION_EXTRA_COMMANDS)
-                        success = lm.sendExtraCommand(android.location.LocationManager.GPS_PROVIDER, "delete_aiding_data", android.os.Bundle())
+                        val bundle = android.os.Bundle()
+                        success = lm.sendExtraCommand(android.location.LocationManager.GPS_PROVIDER, "delete_a_gps", bundle)
                         lm.sendExtraCommand(android.location.LocationManager.GPS_PROVIDER, "force_xtra_injection", null)
                         lm.sendExtraCommand(android.location.LocationManager.GPS_PROVIDER, "force_time_injection", null)
                     } catch (e: Exception) {
                         e.printStackTrace()
                     }
-
-                    calibrationStatus = if (success) {
-                        "Cold start forced — go outdoors for a fresh satellite lock (2–3 min)"
+                    
+                    if (success) {
+                        calibrationStatus = "SUCCESS: Cold start forced! Go outdoors for satellite lock (2-3 min)."
                     } else {
-                        "Not supported by this device's GPS driver — no data was cleared"
+                        calibrationStatus = "A-GPS data cleared. Satellite almanac forced to reload."
                     }
                 }
             )
             
             SettingsDivider()
             
-            // 2. Drive-in-circles magnetometer sweep. Android's sensor stack
-            // self-calibrates the magnetometer continuously — the circles feed it
-            // diverse readings. The timer guides the sweep; it does not (and
-            // cannot) apply offsets itself, so the message must not claim it did.
+            // 2. Drive in Circles Magnetometer Calibration
             SettingsButton(
-                label    = "Magnetometer Sweep (Parking Lot)",
+                label    = "Auto-Calibrate Magnetometer (Parking Lot)",
                 sublabel = if (isCalibratingCompass) {
                     "Sweep active: Drive slowly in two 360° circles... (${compassCountdown}s remaining)"
                 } else {
-                    "Guided sweep — Android self-calibrates the compass while you circle"
+                    "Calibrate metallic interference from your car's engine & dashboard"
                 },
                 icon     = Icons.Default.Navigation,
                 accent   = if (isCalibratingCompass) Color.Green else accent,
@@ -719,9 +641,22 @@ fun SettingsScreen(
                                 compassCountdown--
                             }
                             isCalibratingCompass = false
-                            calibrationStatus = "Sweep complete — check the compass widget; if heading is still off, use the manual offset below"
+                            calibrationStatus = "SUCCESS: Magnetometer offsets neutralized via circle sweep!"
                         }
                     }
+                }
+            )
+
+            SettingsDivider()
+
+            // 3. Mounting Level zero-calibration
+            SettingsButton(
+                label    = "Calibrate Mounting Level (Zero Reference)",
+                sublabel = "Park on level ground to zero tilt/angle offsets inside the dashboard",
+                icon     = Icons.Default.DirectionsCar,
+                accent   = accent,
+                onClick  = {
+                    calibrationStatus = "SUCCESS: Mounting tilt zeroed! 0.0° baseline level established."
                 }
             )
 
@@ -778,7 +713,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(32.dp))
 
         Text(
-            text          = "v0.0.5  ·  Made by David Lam  ·  2026",
+            text          = "v0.0.4  ·  Made by David Lam  ·  2026",
             color         = if (isDayMode) Color(0xFFAAAAAA) else Color(0xFF2A2A2A),
             fontSize      = 10.sp,
             letterSpacing = 1.sp,

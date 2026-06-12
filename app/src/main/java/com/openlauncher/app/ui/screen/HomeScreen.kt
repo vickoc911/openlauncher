@@ -64,8 +64,7 @@ private val ALL_WIDGET_TYPES = listOf(
     WidgetTypeInfo("SPEEDOMETER", "SPEED",       Icons.Default.Speed,         "GPS speed"),
     WidgetTypeInfo("VITALS",      "VITALS",      Icons.Default.Dns,           "Head Unit Health / Vitals"),
     WidgetTypeInfo("TRIP_TRACKER", "TRIP TRACKER", Icons.Default.Map,          "Trip logs & stats"),
-    WidgetTypeInfo("SOUNDBOARD",  "SOUNDBOARD",  Icons.Default.Piano,         "Custom sound pads"),
-    WidgetTypeInfo("MAP", "MAP", Icons.Default.Map, "Live GPS map")
+    WidgetTypeInfo("SOUNDBOARD",  "SOUNDBOARD",  Icons.Default.Piano,         "Custom sound pads")
 )
 
 private fun canAddWidget(settings: com.openlauncher.app.data.AppSettings): Boolean {
@@ -79,7 +78,6 @@ private fun canAddWidget(settings: com.openlauncher.app.data.AppSettings): Boole
         if (settings.showVitals) add("VITALS")
         if (settings.showTripTracker) add("TRIP_TRACKER")
         if (settings.showSoundboard) add("SOUNDBOARD")
-        if (settings.showMap) add("MAP")
     }
     val activeWidgets = settings.widgetLayout.filter { it.enabled && it.id in visibleIds }
     val occupied = buildSet<Pair<Int, Int>> {
@@ -134,8 +132,6 @@ fun HomeScreen(
     onRadioCycleFm: () -> Unit = {},
     onRadioSwitchAm: () -> Unit = {},
     onRadioTune: (band: String, freq: Float) -> Unit = { _, _ -> },
-    onAssignRadio: () -> Unit = {},
-    onToggleMapProvider: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val accent       = Color(settings.accentColor)
@@ -152,8 +148,7 @@ fun HomeScreen(
         else         -> MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
     }
     val headerTextColor   = if (isDayMode) Color(0xFF111111) else accent
-    val statusIconColor   = if (isDayMode) Color(0xFF444444) else Color(0xFF666666)
-    val controlIconColor  = if (isDayMode) Color(0xFF666666) else Color(0xFF444444)
+    val statusIconColor   = if (isDayMode) Color(0xFF666666) else Color(0xFF666666)
 
     var resizingId    by remember { mutableStateOf<String?>(null) }
     var contextMenuId by remember { mutableStateOf<String?>(null) }
@@ -182,11 +177,11 @@ fun HomeScreen(
             )
             Spacer(Modifier.weight(1f))
             AnimatedVisibility(visible = isWifi, enter = fadeIn(), exit = fadeOut()) {
-                Icon(Icons.Default.Wifi, "WiFi", tint = statusIconColor, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.Wifi, "WiFi", tint = Color(0xFF666666), modifier = Modifier.size(16.dp))
             }
             if (isWifi) Spacer(Modifier.width(6.dp))
             AnimatedVisibility(visible = isData, enter = fadeIn(), exit = fadeOut()) {
-                Icon(Icons.Default.SignalCellularAlt, "Data", tint = statusIconColor, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.SignalCellularAlt, "Data", tint = Color(0xFF666666), modifier = Modifier.size(16.dp))
             }
             if (isLandscape) {
                 Spacer(Modifier.width(8.dp))
@@ -198,7 +193,7 @@ fun HomeScreen(
                         Icon(
                             imageVector        = Icons.Default.Dashboard,
                             contentDescription = "Widget library",
-                            tint               = controlIconColor,
+                            tint               = Color(0xFF444444),
                             modifier           = Modifier.size(15.dp)
                         )
                     }
@@ -211,7 +206,7 @@ fun HomeScreen(
                     Icon(
                         imageVector        = Icons.Default.Edit,
                         contentDescription = "Edit widgets",
-                        tint               = if (editMode) accent else controlIconColor,
+                        tint               = if (editMode) accent else Color(0xFF444444),
                         modifier           = Modifier.size(15.dp)
                     )
                 }
@@ -232,13 +227,9 @@ fun HomeScreen(
             val cellStepXPx = with(density) { (cellW + gap).toPx() }
             val cellStepYPx = with(density) { (cellH + gap).toPx() }
 
-            // WEATHER stays in the set even with no data: the commit path
-            // (LauncherViewModel.moveWidgetConfig) computes against settings flags
-            // only, so dropping it here would make the drop ghost and the committed
-            // layout disagree. With no data the cell renders fully transparent.
             val visibleIds = buildSet {
                 if (settings.showClock) add("CLOCK")
-                if (settings.showWeather) add("WEATHER")
+                if (settings.showWeather && weather != null) add("WEATHER")
                 if (settings.showNowPlaying) add("NOW_PLAYING")
                 if (settings.showTelemetry) add("TELEMETRY")
                 if (settings.showAltimeter) add("ALTIMETER")
@@ -246,7 +237,6 @@ fun HomeScreen(
                 if (settings.showVitals) add("VITALS")
                 if (settings.showTripTracker) add("TRIP_TRACKER")
                 if (settings.showSoundboard) add("SOUNDBOARD")
-                if (settings.showMap) add("MAP")
             }
 
             // Keep only visible widgets exactly as configured in settings, allowing explicit resizing to dictate layout
@@ -322,16 +312,12 @@ fun HomeScreen(
                     "SPEEDOMETER" -> "SPEED"
                     "TRIP_TRACKER" -> "TRIP"
                     "SOUNDBOARD"  -> "SOUND"
-                    "MAP" -> "MAP"
                     else          -> w.id
                 }
 
                 // Original (pre-auto-expand) spanX needed for drag boundary clamping
                 val origSpanX  = visible.find { it.id == w.id }?.spanX ?: 1
                 val isDragging = draggingId == w.id
-                // Weather with no data reserves its cell but draws nothing
-                // (still visible in edit mode so it can be moved/removed)
-                val isGhost    = w.id == "WEATHER" && weather == null && !editMode
                 val dragDpX    = if (isDragging) with(density) { dragOffsetPx.x.toDp() } else 0.dp
                 val dragDpY    = if (isDragging) with(density) { dragOffsetPx.y.toDp() } else 0.dp
 
@@ -342,14 +328,10 @@ fun HomeScreen(
                         .size(width, height)
                         .zIndex(if (isDragging) 1f else 0f)
                         .clip(WIDGET_RADIUS)
-                        .background(if (isGhost) Color.Transparent else widgetBg)
+                        .background(widgetBg)
                         .border(
                             width = if (editMode) 1.5.dp else 1.dp,
-                            color = when {
-                                editMode -> accent.copy(alpha = 0.45f)
-                                isGhost  -> Color.Transparent
-                                else     -> widgetBorder
-                            },
+                            color = if (editMode) accent.copy(alpha = 0.45f) else widgetBorder,
                             shape = WIDGET_RADIUS
                         )
                         .combinedClickable(
@@ -361,9 +343,6 @@ fun HomeScreen(
                         .then(
                             if (editMode) Modifier.pointerInput(editMode, w.id, w.gridX, w.gridY) {
                                 var hasSignificantDrag = false
-                                // Touch-slop gate: without it, sub-pixel jitter during a
-                                // long-press counts as a drag and the context menu never opens
-                                val slop = viewConfiguration.touchSlop
                                 detectDragGesturesAfterLongPress(
                                     onDragStart = { _ ->
                                         draggingId         = w.id
@@ -373,9 +352,7 @@ fun HomeScreen(
                                     onDrag = { change, dragAmount ->
                                         change.consume()
                                         dragOffsetPx      += dragAmount
-                                        if (!hasSignificantDrag && dragOffsetPx.getDistance() > slop) {
-                                            hasSignificantDrag = true
-                                        }
+                                        hasSignificantDrag = true
                                     },
                                     onDragEnd = {
                                         if (hasSignificantDrag) {
@@ -433,8 +410,7 @@ fun HomeScreen(
                             onRadioSeekDown       = onRadioSeekDown,
                             onRadioCycleFm        = onRadioCycleFm,
                             onRadioSwitchAm       = onRadioSwitchAm,
-                            onRadioTune           = onRadioTune,
-                            onAssignRadio         = onAssignRadio
+                            onRadioTune           = onRadioTune
                         )
                         "TELEMETRY" -> TelemetryWidget(
                             location  = location,
@@ -479,21 +455,10 @@ fun HomeScreen(
                             onUpdatePad = onUpdateSoundPad,
                             modifier  = Modifier.fillMaxSize()
                         )
-                        "MAP" -> MapWidget(
-                            location        = location,
-                            mapProvider     = settings.mapProvider,
-                            accent          = accent,
-                            isDayMode       = isDayMode,
-                            editMode        = editMode,
-                            onToggleProvider = onToggleMapProvider,
-                            onLongClick     = { contextMenuId = w.id },
-                            modifier        = Modifier.fillMaxSize()
-                        )
                     }
 
                     // Label — hide when album art fills the widget background
                     val labelColor = when {
-                        isGhost -> Color.Transparent
                         w.id == "NOW_PLAYING" && nowPlaying?.albumArt != null && nowPlaying.title.isNotEmpty() -> Color.Transparent
                         isDayMode -> Color(0xFF999999)
                         else      -> Color(0xFF3A3A3A)
@@ -535,8 +500,7 @@ fun HomeScreen(
             onSetClockStyle     = { onSetClockStyle(it) },
             onSetVitalsAsBars   = { onSetVitalsAsBars(it) },
             onSetSpeedometerDigitalOnly = { onSetSpeedometerDigitalOnly(it) },
-            onDismiss           = { contextMenuId = null },
-            onToggleMapProvider = onToggleMapProvider
+            onDismiss           = { contextMenuId = null }
         )
     }
 
@@ -591,8 +555,7 @@ private fun WidgetContextMenu(
     onSetClockStyle: (ClockStyle) -> Unit,
     onSetVitalsAsBars: (Boolean) -> Unit,
     onSetSpeedometerDigitalOnly: (Boolean) -> Unit,
-    onDismiss: () -> Unit,
-    onToggleMapProvider: () -> Unit
+    onDismiss: () -> Unit
 ) {
     val menuBg    = if (isDayMode) Color(0xFFFFFFFF) else Color(0xFF111111)
     val menuBorder = if (isDayMode) Color(0xFFDDE1E5) else Color(0xFF1E1E1E)
@@ -906,7 +869,7 @@ private fun WidgetLibraryDialog(
             if (!canAdd) {
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text          = "ALL ${GRID_COLS * GRID_ROWS} CELLS OCCUPIED — REMOVE A WIDGET TO ADD MORE",
+                    text          = "ALL 6 CELLS OCCUPIED — REMOVE A WIDGET TO ADD MORE",
                     color         = if (isDayMode) Color(0xFFE03131) else Color(0xFF3A3A3A),
                     fontSize      = 8.sp,
                     letterSpacing = 1.sp,

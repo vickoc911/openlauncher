@@ -9,7 +9,6 @@ enum class AppFont { SYSTEM, JETBRAINS_MONO, SOURCE_CODE_PRO }
 enum class DayNightMode { DARK, LIGHT, AUTO, SYSTEM }
 enum class SidebarPosition { LEFT, RIGHT, BOTTOM }
 enum class GradientDirection { TOP_TO_BOTTOM, LEFT_TO_RIGHT, DIAGONAL, RADIAL }
-enum class MapProvider { OSM, GOOGLE }
 
 enum class DefaultShortcutIcon {
     NONE,
@@ -93,8 +92,6 @@ data class AppSettings(
     val dayNightMode: DayNightMode = DayNightMode.DARK,
     val showPip: Boolean = false,
     val pipAppPackage: String = "",
-    // Head unit's radio app — mirrored & controlled via its MediaSession
-    val radioPackage: String = "",
     val onboardingCompleted: Boolean = false,
     val showVitals: Boolean = false,
     val showTripTracker: Boolean = false,
@@ -104,9 +101,7 @@ data class AppSettings(
     val vitalsAsBars: Boolean = false,
     val speedometerDigitalOnly: Boolean = false,
     val gradientDirection: GradientDirection = GradientDirection.DIAGONAL,
-    val useCustomBackgroundColor: Boolean = false,
-    val showMap: Boolean = false,
-    val mapProvider: MapProvider = MapProvider.OSM
+    val useCustomBackgroundColor: Boolean = false
 )
 
 fun defaultShortcuts() = listOf(
@@ -133,7 +128,6 @@ fun AppSettings.activeWidgetIds(): Set<String> = buildSet {
     if (showVitals) add("VITALS")
     if (showTripTracker) add("TRIP_TRACKER")
     if (showSoundboard) add("SOUNDBOARD")
-    if (showMap) add("MAP")
 }
 
 /**

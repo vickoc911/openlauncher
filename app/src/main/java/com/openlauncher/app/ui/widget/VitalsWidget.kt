@@ -150,15 +150,12 @@ fun VitalsWidget(
         } catch (_: Exception) {}
     }
 
-    // Periodic polling loop — the /proc and /sys reads are file I/O, so they
-    // run on the IO dispatcher instead of blocking the main thread every tick
+    // Periodic polling loop
     LaunchedEffect(Unit) {
         while (true) {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                updateCpu()
-                updateRam()
-                temperature = getCpuTemp()
-            }
+            updateCpu()
+            updateRam()
+            temperature = getCpuTemp()
             delay(2500)
         }
     }

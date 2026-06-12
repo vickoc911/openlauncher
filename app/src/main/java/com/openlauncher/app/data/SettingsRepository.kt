@@ -59,6 +59,8 @@ class SettingsRepository(private val context: Context) {
         val SPEEDOMETER_DIGITAL_ONLY = booleanPreferencesKey("speedometer_digital_only")
         val GRADIENT_DIRECTION    = stringPreferencesKey("gradient_direction")
         val USE_CUSTOM_BG_COLOR   = booleanPreferencesKey("use_custom_bg_color")
+        val SHOW_MAP      = booleanPreferencesKey("show_map")
+        val MAP_PROVIDER  = stringPreferencesKey("map_provider")
     }
 
     val settingsFlow: Flow<AppSettings> = context.dataStore.data

@@ -13,6 +13,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.openlauncher.app.data.AppSettings
 import com.openlauncher.app.data.DayNightMode
+import com.openlauncher.app.data.MapProvider
 import com.openlauncher.app.data.DefaultShortcutIcon
 import com.openlauncher.app.data.GRID_COLS
 import com.openlauncher.app.data.GRID_ROWS
@@ -199,6 +200,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 "VITALS"      -> copy(showVitals = true)
                 "TRIP_TRACKER" -> copy(showTripTracker = true)
                 "SOUNDBOARD"  -> copy(showSoundboard = true)
+                "MAP" -> copy(showMap = true)
                 else          -> this
             }
             val idx       = layout.indexOfFirst { it.id == id }
@@ -223,6 +225,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 "VITALS"      -> copy(showVitals = false)
                 "TRIP_TRACKER" -> copy(showTripTracker = false)
                 "SOUNDBOARD"  -> copy(showSoundboard = false)
+                "MAP" -> copy(showMap = false)
                 else          -> this
             }
         }
@@ -231,6 +234,12 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun updateSoundboardPad(index: Int, pad: SoundPadConfig) {
         updateSettings {
             copy(soundboardPads = soundboardPads.toMutableList().also { it[index] = pad })
+        }
+    }
+
+    fun toggleMapProvider() {
+        updateSettings {
+            copy(mapProvider = if (mapProvider == MapProvider.OSM) MapProvider.GOOGLE else MapProvider.OSM)
         }
     }
 
@@ -313,16 +322,70 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     val nowPlaying: StateFlow<NowPlayingState?> = MediaListenerService.nowPlaying
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    fun playPause() { nowPlaying.value?.controller?.also { ctrl ->
-        val state = ctrl.playbackState?.state
-        if (state == android.media.session.PlaybackState.STATE_PLAYING)
-            ctrl.transportControls?.pause()
-        else
-            ctrl.transportControls?.play()
-    }}
+    fun playPause(context: Context) {
+        val ctrl = nowPlaying.value?.controller
+        if (ctrl != null) {
+            val state = ctrl.playbackState?.state
+            if (state == android.media.session.PlaybackState.STATE_PLAYING)
+                ctrl.transportControls?.pause()
+            else
+                ctrl.transportControls?.play()
+        } else {
+            playLastOrOpenActive(context)
+        }
+    }
 
     fun skipNext() { nowPlaying.value?.controller?.transportControls?.skipToNext() }
     fun skipPrev() { nowPlaying.value?.controller?.transportControls?.skipToPrevious() }
+
+    private fun getFallbackMusicPackage(context: Context): String {
+        val pm = context.packageManager
+        val candidates = listOf(
+            "com.spotify.music",
+            "com.google.android.apps.youtube.music",
+            "com.apple.android.music",
+            "org.videolan.vlc",
+            "com.pandora.android",
+            "com.deezer.android"
+        )
+        for (pkg in candidates) {
+            try {
+                pm.getPackageInfo(pkg, 0)
+                return pkg
+            } catch (_: Exception) {}
+        }
+        return ""
+    }
+
+    fun playLastOrOpenActive(context: Context) {
+        val state = nowPlaying.value
+        val controller = state?.controller
+        val pkg = controller?.packageName ?: MediaListenerService.lastMediaPackage.ifEmpty {
+            getFallbackMusicPackage(context)
+        }
+        
+        // Launch the app
+        if (pkg.isNotEmpty()) {
+            val intent = context.packageManager.getLaunchIntentForPackage(pkg)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+            }
+        }
+
+        // Start playback if not already playing
+        if (state?.isPlaying != true) {
+            if (controller != null) {
+                controller.transportControls?.play()
+            } else {
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                val eventDown = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
+                audioManager.dispatchMediaKeyEvent(eventDown)
+                val eventUp = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
+                audioManager.dispatchMediaKeyEvent(eventUp)
+            }
+        }
+    }
 
     // ── Weather ───────────────────────────────────────────────────────────────
     private val _weather = MutableStateFlow<WeatherState?>(null)

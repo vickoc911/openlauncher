@@ -81,6 +81,7 @@ class MediaListenerService : NotificationListenerService() {
 
     private fun updateFromController(controller: MediaController?) {
         if (controller == null) { _nowPlaying.value = null; return }
+        lastMediaPackage = controller.packageName
         val meta = controller.metadata
         _nowPlaying.value = NowPlayingState(
             title      = meta?.getString(MediaMetadata.METADATA_KEY_TITLE)
@@ -103,6 +104,7 @@ class MediaListenerService : NotificationListenerService() {
         private val _nowPlaying = MutableStateFlow<NowPlayingState?>(null)
         val nowPlaying: StateFlow<NowPlayingState?> = _nowPlaying
         val isConnected = MutableStateFlow(false)
+        var lastMediaPackage: String = ""
 
         @Volatile private var instance: MediaListenerService? = null
         fun requestRefresh() { instance?.refreshNowPlaying() }

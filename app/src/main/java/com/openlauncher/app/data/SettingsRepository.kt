@@ -58,6 +58,8 @@ class SettingsRepository(private val context: Context) {
         val SPEEDOMETER_DIGITAL_ONLY = booleanPreferencesKey("speedometer_digital_only")
         val GRADIENT_DIRECTION    = stringPreferencesKey("gradient_direction")
         val USE_CUSTOM_BG_COLOR   = booleanPreferencesKey("use_custom_bg_color")
+        val SHOW_MAP      = booleanPreferencesKey("show_map")
+        val MAP_PROVIDER  = stringPreferencesKey("map_provider")
     }
 
     val settingsFlow: Flow<AppSettings> = context.dataStore.data
@@ -124,7 +126,9 @@ class SettingsRepository(private val context: Context) {
                 vitalsAsBars     = prefs[Keys.VITALS_AS_BARS] ?: defaults.vitalsAsBars,
                 speedometerDigitalOnly = prefs[Keys.SPEEDOMETER_DIGITAL_ONLY] ?: defaults.speedometerDigitalOnly,
                 gradientDirection = prefs[Keys.GRADIENT_DIRECTION]?.let { runCatching { GradientDirection.valueOf(it) }.getOrNull() } ?: defaults.gradientDirection,
-                useCustomBackgroundColor = prefs[Keys.USE_CUSTOM_BG_COLOR] ?: defaults.useCustomBackgroundColor
+                useCustomBackgroundColor = prefs[Keys.USE_CUSTOM_BG_COLOR] ?: defaults.useCustomBackgroundColor,
+                showMap      = prefs[Keys.SHOW_MAP] ?: defaults.showMap,
+                mapProvider  = prefs[Keys.MAP_PROVIDER]?.let { runCatching { MapProvider.valueOf(it) }.getOrNull() } ?: defaults.mapProvider
             )
         }
 
@@ -169,6 +173,8 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.SPEEDOMETER_DIGITAL_ONLY] = s.speedometerDigitalOnly
             prefs[Keys.GRADIENT_DIRECTION] = s.gradientDirection.name
             prefs[Keys.USE_CUSTOM_BG_COLOR] = s.useCustomBackgroundColor
+            prefs[Keys.SHOW_MAP]      = s.showMap
+            prefs[Keys.MAP_PROVIDER]  = s.mapProvider.name
         }
     }
 

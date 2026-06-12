@@ -92,7 +92,7 @@ fun NowPlayingWidget(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .clip(RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(20.dp))
     ) {
         // 1. CONDITIONAL VIEW TOGGLE
         if (selectedSource == "FM/AM Radio") {
@@ -631,6 +631,18 @@ private fun StandardMinimalPlayer(
     val subTextColor = if (isDayMode) Color(0xFF666666) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.30f)
 
     Box(modifier = modifier) {
+        // Transparent clickable background overlay (underneath controls) to open the player
+        if (!isEditing) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null
+                    ) { onTapToOpenApp() }
+            )
+        }
+
         if (!hasContent) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -686,10 +698,24 @@ private fun StandardMinimalPlayer(
                 } else {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(Icons.Default.MusicNote, null, tint = idleIconColor, modifier = Modifier.size(24.dp))
-                        Text("NO MEDIA PLAYING", color = idleTextColor, fontSize = 7.sp, letterSpacing = 1.sp)
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(if (isDayMode) Color(0xFF111111) else accent.copy(alpha = 0.9f))
+                                .clickable { onTapToOpenApp() }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Play",
+                                tint = if (isDayMode) Color.White else Color.Black,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Text("TAP TO PLAY MUSIC", color = idleTextColor, fontSize = 9.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

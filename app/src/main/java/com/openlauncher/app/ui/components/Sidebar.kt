@@ -61,7 +61,7 @@ fun Sidebar(
 ) {
     val isDayMode    = LocalDayMode.current
     val accent       = Color(settings.accentColor)
-    val sidebarBg    = if (isDayMode) Color(0xFFE0E0E0) else Color.Black.copy(alpha = 0.4f)
+    val sidebarBg    = if (isDayMode) Color(0xFFE0E0E0) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
     val iconInactive = if (isDayMode) Color(0xFF777777) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.3f)
     val dividerColor = if (isDayMode) Color(0xFFCCCCCC) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
     val density      = LocalDensity.current
@@ -160,6 +160,7 @@ fun Sidebar(
             modifier = modifier
                 .fillMaxWidth()
                 .height(56.dp)
+                .clip(RoundedCornerShape(60.dp))
                 .background(sidebarBg)
         ) {
             // Shortcuts truly centred across the full width
@@ -191,10 +192,12 @@ fun Sidebar(
     } else {
         Column(
             modifier = modifier
-                .width(56.dp)
-                .fillMaxHeight()
-                .background(sidebarBg),
-            horizontalAlignment = Alignment.CenterHorizontally
+            .padding(8.dp)
+            .width(56.dp)
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(60.dp))
+            .background(sidebarBg),
+               horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Column(
                 modifier = Modifier
@@ -495,6 +498,7 @@ private fun NavButton(
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
+        .clip(RoundedCornerShape(20.dp))
             .then(
                 if (isHorizontal) Modifier.fillMaxHeight().width(SLOT_SIZE)
                 else              Modifier.fillMaxWidth().height(SLOT_SIZE)

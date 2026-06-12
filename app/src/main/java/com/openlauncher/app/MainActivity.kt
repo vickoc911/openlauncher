@@ -197,7 +197,7 @@ class MainActivity : ComponentActivity() {
                                         isWifi              = isWifi,
                                         isData              = isData,
                                         isDayMode           = isDayMode,
-                                        onPlayPause         = vm::playPause,
+                                        onPlayPause         = { vm.playPause(this@MainActivity) },
                                         onNext              = vm::skipNext,
                                         onPrev              = vm::skipPrev,
                                         onLaunchCarPlay     = { vm.launchApp(settings.carPlayPackage) },
@@ -210,8 +210,7 @@ class MainActivity : ComponentActivity() {
                                         onClearPip          = { vm.clearPipApp() },
                                         onLaunchPip         = { vm.launchApp(settings.pipAppPackage) },
                                         onTapNowPlaying     = {
-                                            val pkg = nowPlaying?.controller?.packageName
-                                            if (!pkg.isNullOrEmpty()) vm.launchApp(pkg)
+                                            vm.playLastOrOpenActive(this@MainActivity)
                                         },
                                         onUpdateWidget      = { id, sx, sy -> vm.updateWidgetConfig(id, sx, sy) },
                                         onMoveWidget        = { id, gx, gy -> vm.moveWidgetConfig(id, gx, gy) },
@@ -228,7 +227,8 @@ class MainActivity : ComponentActivity() {
                                         onRadioSeekDown       = { vm.radioSeekDown() },
                                         onRadioCycleFm        = { vm.radioCycleFm() },
                                         onRadioSwitchAm       = { vm.radioSwitchAm() },
-                                        onRadioTune           = { band, freq -> vm.radioTune(band, freq) }
+                                        onRadioTune           = { band, freq -> vm.radioTune(band, freq) },
+                                        onToggleMapProvider = { vm.toggleMapProvider() }
                                     )
 
                                     NavDestination.APP_LIBRARY -> AppLibraryScreen(

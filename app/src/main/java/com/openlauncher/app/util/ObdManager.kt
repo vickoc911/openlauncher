@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothSocket
 import android.content.Context
+import android.media.AudioManager
+import android.media.ToneGenerator
 import com.openlauncher.app.model.ObdState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -62,6 +64,22 @@ class ObdManager(private val context: Context) {
     private var accumulatedTripKm = 0.0
     private var lastSpeedPollMs = 0L
 
+    // Active DPF Regeneration audio alert state
+    private var wasRegenActive = false
+
+    private fun playGentleRegenBeep() {
+        try {
+            val tg = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60)
+            tg.startTone(ToneGenerator.TONE_PROP_BEEP, 200)
+            scope.launch {
+                delay(300)
+                tg.release()
+            }
+        } catch (e: Exception) {
+            FileLogger.log(context, "OBD Beep Error: ${e.message}")
+        }
+    }
+
     companion object {
         private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
@@ -85,8 +103,11 @@ class ObdManager(private val context: Context) {
         const val CALIBRATION_LOGGING = false
         private val CALIBRATION_CMDS = listOf("2101", "2106", "2107", "211B")
 
-        /** A lower distance is accepted as a regeneration reset only after this many agreeing readings. */
-        private const val RESET_CONFIRMATIONS = 4
+        /**
+         * A big drop of the distance counter is accepted as a regeneration reset after this many consecutive
+         * readings that keep counting up from the new value (the car may be driving, so they are NOT equal).
+         */
+        private const val RESET_CONFIRMATIONS = 2
         private const val NOISE_TOLERANCE_KM = 0.05
 
         data class DpfFrame(
@@ -167,23 +188,15 @@ class ObdManager(private val context: Context) {
 
         /** Parses ELM327 AT RV response (e.g. "14.2V" -> 14.2) or PID 01 42 */
         fun parseVoltageResponse(response: String): Double? {
-            val clean = response.uppercase().replace("V", "").replace(">", "").trim()
-            clean.toDoubleOrNull()?.let { return it.coerceIn(0.0, 30.0) }
-
-            val b = decodeResponse(response) ?: return null
-            if (b.size >= 4 && b[0] == 0x41 && b[1] == 0x42) {
+            val b = decodeResponse(response)
+            if (b != null && b.size >= 4 && b[0] == 0x41 && b[1] == 0x42) {
                 val raw = (b[2] shl 8) or b[3]
                 return (raw / 1000.0).coerceIn(0.0, 30.0)
             }
-            return null
-        }
 
-        /** Standard PID 01 5E: Fuel Rate = ((A * 256) + B) / 20.0 (L/h) */
-        fun parseFuelRateResponse(response: String): Double? {
-            val b = decodeResponse(response) ?: return null
-            if (b.size < 4 || b[0] != 0x41 || b[1] != 0x5E) return null
-            val raw = (b[2] shl 8) or b[3]
-            return (raw / 20.0).coerceIn(0.0, 100.0)
+            val clean = response.uppercase().replace("V", "").replace(">", "").trim()
+            clean.toDoubleOrNull()?.let { return (it + 0.6).coerceIn(0.0, 30.0) } // Adjust for Vlink adapter internal diode drop
+            return null
         }
 
         /** Standard PID 01 0C: Engine RPM = ((A * 256) + B) / 4 */
@@ -201,23 +214,16 @@ class ObdManager(private val context: Context) {
             return b[2].coerceIn(0, 300)
         }
 
-        /** Standard PID 01 0B: MAP (kPa) -> Turbo Boost (Bar) */
-        fun parseTurboBoostResponse(response: String): Double? {
-            val b = decodeResponse(response) ?: return null
-            if (b.size < 3 || b[0] != 0x41 || b[1] != 0x0B) return null
-            val mapKpa = b[2]
-            val boostBar = (mapKpa - 101) / 100.0
-            return boostBar.coerceIn(0.0, 3.5)
-        }
-
         fun toHexString(bytes: List<Int>?): String =
             bytes?.joinToString(" ") { "%02X".format(it) } ?: "null"
     }
 
     /**
-     * Distance since regeneration must never go backwards during normal driving.
-     * Lower readings are ignored (noise / glitches) unless they repeat consistently, which means
-     * the ECU really reset the counter after a regeneration.
+     * Distance since regeneration only goes up while driving, and drops to ~0 when a regeneration ends.
+     *  - rising value                    -> accept
+     *  - tiny decrease (<= 0.05 km)      -> noise, keep the previous value
+     *  - big decrease                    -> glitch OR real reset. Accept it once two consecutive readings keep
+     *    counting up from the low value (pending follows the counter, so a moving car is fine).
      */
     private fun acceptDistance(km: Double): Double {
         val last = lastDistanceKm
@@ -227,13 +233,13 @@ class ObdManager(private val context: Context) {
             pendingResetCount = 0
             return km
         }
+        if (last - km <= NOISE_TOLERANCE_KM) return last
+
         val pending = pendingResetKm
-        if (pending != null && abs(km - pending) <= NOISE_TOLERANCE_KM) {
-            pendingResetCount++
-        } else {
-            pendingResetKm = km
-            pendingResetCount = 1
-        }
+        pendingResetCount =
+            if (pending != null && km >= pending - NOISE_TOLERANCE_KM) pendingResetCount + 1 else 1
+        pendingResetKm = km                      // follow the counter instead of the first reading
+
         if (pendingResetCount >= RESET_CONFIRMATIONS) {
             FileLogger.log(context, "OBD: distance reset detected ($last -> $km km) - regeneration")
             lastDistanceKm = km
@@ -241,7 +247,7 @@ class ObdManager(private val context: Context) {
             pendingResetCount = 0
             return km
         }
-        return last   // keep the previous (higher) value
+        return last   // first low reading: keep the previous value for one more cycle
     }
 
     fun start(deviceAddress: String) {
@@ -367,14 +373,15 @@ class ObdManager(private val context: Context) {
                 val distanceKm = rawDistance?.let { acceptDistance(it) }
                 val dpf = parseDpfMainFrame(respDpf)
 
-                // Optional standard metrics polling
-                val respRv = sendCmd("AT RV\r")
+                // Poll Control Module Voltage via PID 0142 or AT RV
+                val respVolt0142 = sendCmd("0142\r")
                 delay(60)
-                val voltage = parseVoltageResponse(respRv)
-
-                val respFuel = sendCmd("015E\r")
-                delay(60)
-                val fuelRate = parseFuelRateResponse(respFuel)
+                var voltage = parseVoltageResponse(respVolt0142)
+                if (voltage == null) {
+                    val respRv = sendCmd("AT RV\r")
+                    delay(60)
+                    voltage = parseVoltageResponse(respRv)
+                }
 
                 val respSpeed = sendCmd("010D\r")
                 delay(60)
@@ -384,10 +391,6 @@ class ObdManager(private val context: Context) {
                 delay(60)
                 val rpm = parseEngineRpmResponse(respRpm)
 
-                val respBoost = sendCmd("010B\r")
-                delay(60)
-                val boostBar = parseTurboBoostResponse(respBoost)
-
                 // Update accumulated trip distance
                 val nowMs = System.currentTimeMillis()
                 if (lastSpeedPollMs > 0 && speedKmh != null && speedKmh > 0) {
@@ -395,10 +398,6 @@ class ObdManager(private val context: Context) {
                     accumulatedTripKm += speedKmh * deltaHours
                 }
                 lastSpeedPollMs = nowMs
-
-                val fuelEconomyL100 = if (speedKmh != null && speedKmh > 5 && fuelRate != null) {
-                    (fuelRate / speedKmh.toDouble()) * 100.0
-                } else null
 
                 val rawParts = mutableListOf(
                     "0105:${toHexString(decodeResponse(respCoolant))}",
@@ -430,16 +429,21 @@ class ObdManager(private val context: Context) {
                     sootGrams = dpf?.sootGrams ?: _obdState.value.sootGrams,
                     distanceSinceRegenKm = distanceKm?.roundToInt() ?: _obdState.value.distanceSinceRegenKm,
                     voltageVolts = voltage ?: _obdState.value.voltageVolts,
-                    fuelRateLh = fuelRate ?: _obdState.value.fuelRateLh,
-                    fuelEconomyL100km = fuelEconomyL100 ?: _obdState.value.fuelEconomyL100km,
                     engineRpm = rpm ?: _obdState.value.engineRpm,
-                    turboBoostBar = boostBar ?: _obdState.value.turboBoostBar,
                     tripDistanceKm = accumulatedTripKm,
                     vehicleSpeedKmh = speedKmh ?: _obdState.value.vehicleSpeedKmh,
                     statusMessage = "CONNECTED",
                     rawFrameDump = rawSummary,
                     lastUpdatedMs = System.currentTimeMillis()
                 )
+
+                // Gentle audio notification when active DPF regeneration begins (dpfTemp >= 500°C)
+                val isRegenNow = _obdState.value.isDpfRegenActive
+                if (isRegenNow && !wasRegenActive) {
+                    playGentleRegenBeep()
+                    FileLogger.log(context, "OBD: Active DPF Regeneration Started! Played notification beep.")
+                }
+                wasRegenActive = isRegenNow
 
                 delay(1000)
             }

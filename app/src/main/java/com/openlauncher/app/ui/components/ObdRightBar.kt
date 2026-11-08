@@ -18,10 +18,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.FilterAlt
-import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Thermostat
@@ -190,24 +188,7 @@ fun ObdRightBar(
                     )
                 }
 
-                // 6. Fuel Consumption (L/h or L/100km)
-                if (settings.showFuelUsage) {
-                    val fuelEconomy = obdState.fuelEconomyL100km
-                    val fuelRate = obdState.fuelRateLh
-                    val fuelText = fuelEconomy?.let { String.format(Locale.US, "%.1fL", it) }
-                        ?: fuelRate?.let { String.format(Locale.US, "%.1fL/h", it) }
-                        ?: "--L/h"
-
-                    ObdGaugeItem(
-                        icon = Icons.Default.LocalGasStation,
-                        valueText = fuelText,
-                        label = "FUEL",
-                        valueColor = textColor,
-                        iconColor = accent
-                    )
-                }
-
-                // 7. Trip Distance (km)
+                // 6. Trip Distance (km)
                 if (settings.showTripDistance) {
                     val tripKm = obdState.tripDistanceKm
                     val tripText = String.format(Locale.US, "%.1f km", tripKm)
@@ -221,7 +202,7 @@ fun ObdRightBar(
                     )
                 }
 
-                // 8. Engine RPM
+                // 7. Engine RPM
                 if (settings.showEngineRpm) {
                     val rpm = obdState.engineRpm
                     val rpmText = rpm?.let { "$it" } ?: "--"
@@ -230,20 +211,6 @@ fun ObdRightBar(
                         icon = Icons.Default.Speed,
                         valueText = rpmText,
                         label = "RPM",
-                        valueColor = textColor,
-                        iconColor = accent
-                    )
-                }
-
-                // 9. Turbo Boost Pressure (Bar)
-                if (settings.showTurboBoost) {
-                    val boost = obdState.turboBoostBar
-                    val boostText = boost?.let { String.format(Locale.US, "%.1f B", it) } ?: "-- B"
-
-                    ObdGaugeItem(
-                        icon = Icons.Default.Compress,
-                        valueText = boostText,
-                        label = "BOOST",
                         valueColor = textColor,
                         iconColor = accent
                     )

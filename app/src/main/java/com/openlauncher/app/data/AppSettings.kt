@@ -122,10 +122,8 @@ data class AppSettings(
     val showLastRegenDist: Boolean = true,
     val showCoolantTemp: Boolean = true,
     val showVoltage: Boolean = true,
-    val showFuelUsage: Boolean = true,
     val showTripDistance: Boolean = true,
-    val showEngineRpm: Boolean = false,
-    val showTurboBoost: Boolean = false
+    val showEngineRpm: Boolean = false
 )
 
 fun defaultShortcuts() = listOf(

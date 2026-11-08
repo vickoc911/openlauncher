@@ -667,16 +667,6 @@ fun SettingsScreen(
 
                 SettingsDivider()
 
-                SettingsRow(label = "Show Fuel Usage", sublabel = "Fuel rate in L/h or L/100km", icon = Icons.Default.LocalGasStation) {
-                    Switch(
-                        checked         = settings.showFuelUsage,
-                        onCheckedChange = { onUpdate { copy(showFuelUsage = it) } },
-                        colors          = switchColors(accent)
-                    )
-                }
-
-                SettingsDivider()
-
                 SettingsRow(label = "Show Trip Distance", sublabel = "Resettable trip odometer in km", icon = Icons.Default.Navigation) {
                     Switch(
                         checked         = settings.showTripDistance,
@@ -691,16 +681,6 @@ fun SettingsScreen(
                     Switch(
                         checked         = settings.showEngineRpm,
                         onCheckedChange = { onUpdate { copy(showEngineRpm = it) } },
-                        colors          = switchColors(accent)
-                    )
-                }
-
-                SettingsDivider()
-
-                SettingsRow(label = "Show Turbo Boost", sublabel = "Manifold boost pressure in Bar", icon = Icons.Default.Compress) {
-                    Switch(
-                        checked         = settings.showTurboBoost,
-                        onCheckedChange = { onUpdate { copy(showTurboBoost = it) } },
                         colors          = switchColors(accent)
                     )
                 }

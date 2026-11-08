@@ -13,8 +13,8 @@ android {
         applicationId  = "com.openlauncher.app"
         minSdk         = 21
         targetSdk      = 36
-        versionCode    = 36
-        versionName    = "2.2.0"
+        versionCode    = 38
+        versionName    = "2.2.2"
     }
 
     signingConfigs {

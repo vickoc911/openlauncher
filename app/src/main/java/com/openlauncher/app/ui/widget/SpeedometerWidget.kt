@@ -17,124 +17,195 @@ import androidx.compose.ui.unit.sp
 import com.openlauncher.app.util.LocationData
 import kotlin.math.cos
 import kotlin.math.sin
+import com.openlauncher.app.R
+import androidx.compose.ui.draw.paint
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
+
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentScope
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.togetherWith
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.unit.TextUnit
+
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.clickable
+import android.content.Intent
+import android.net.Uri
+import coil.compose.AsyncImage
 
 @Composable
 fun SpeedometerWidget(
+    packageName: String,
     location: LocationData?,
     isMetric: Boolean,
     accent: Color,
     isDayMode: Boolean = false,
     digitalOnly: Boolean = false,
+    vehicleImage: String = "",
     modifier: Modifier = Modifier
 ) {
     val maxSpeed     = if (isMetric) 200f else 124f
-    // Obtenemos la velocidad en metros por segundo (o 0 si es nula)
     val rawSpeedMps = location?.speedMps ?: 0f
-    // Filtro de ruido: si es menor a 0.5 m/s (~1.8 km/h), asumimos que el carro está parado
     val filteredSpeedMps = if (rawSpeedMps < 0.5f) 0f else rawSpeedMps
-    // Calculamos la velocidad final a mostrar usando el valor filtrado
-    val speedDisplay = (filteredSpeedMps * if (isMetric) 3.6f else 2.237f).coerceAtLeast(0f)
+    val targetSpeed = (filteredSpeedMps * if (isMetric) 3.6f else 2.237f).coerceAtLeast(0f)
+
+    // Esto obliga al sistema a rellenar el vacío entre los calculos de la velocidad,
+    // dándole tiempo al usuario de ver la transición numérica.
+    val animatedSpeed by animateFloatAsState(
+        targetValue = targetSpeed,
+        animationSpec = tween(
+            durationMillis = 900,
+            easing = LinearOutSlowInEasing
+        ),
+        label = "SpeedAnimation"
+    )
+
+    // El resto de los cálculos numéricos usando el valor animado y fluido
+    val speed = animatedSpeed.toInt()
+    val hundredsText = if (speed >= 100) ((speed / 100) % 10).toString() else ""
+    val tensText = if (speed >= 10) ((speed / 10) % 10).toString() else ""
+    val onesText = (speed % 10).toString()
+
     val unitLabel    = if (isMetric) "KM/H" else "MPH"
     val trackAlpha   = if (isDayMode) 0.18f else 0.07f
     val tickAlphaMaj = if (isDayMode) 0.50f else 0.28f
     val tickAlphaMin = if (isDayMode) 0.25f else 0.13f
 
-    val contentColor = if (isDayMode) Color(0xFF111111) else MaterialTheme.colorScheme.onBackground
-    val subAlpha     = if (isDayMode) 0.55f else 0.32f
+    val contentColor = if (isDayMode) Color(0xFFFFFFFF) else MaterialTheme.colorScheme.onBackground
+    val subAlpha      = if (isDayMode) 0.55f else 0.32f
     val tickBaseColor = if (isDayMode) Color(0xFF222222) else MaterialTheme.colorScheme.onBackground
+    val colorfondob = if (isDayMode) Color.Black.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.2f)
+
+    val context = LocalContext.current
 
     Box(
-        modifier         = modifier,
+        modifier = modifier
+        .paint(
+            painter = if (isDayMode) painterResource(id = R.drawable.fondo_carro) else painterResource(id = R.drawable.fondo_carro_b),
+               contentScale = ContentScale.Crop
+        )
+        .background(colorfondob),
         contentAlignment = Alignment.Center
     ) {
-        if (digitalOnly) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-                modifier            = Modifier.fillMaxSize()
+
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            // ------------------ VELOCIDAD (20%) ------------------
+            Box(
+                modifier = Modifier
+                .fillMaxHeight()
+                .weight(0.3f),
+                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text          = "%.0f".format(speedDisplay),
-                    color         = contentColor,
-                    fontSize      = 54.sp,
-                    fontWeight    = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                    letterSpacing = (-1.5).sp
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text          = unitLabel,
-                    color         = contentColor.copy(alpha = subAlpha * 1.5f),
-                    fontSize      = 10.sp,
-                    fontWeight    = androidx.compose.ui.text.font.FontWeight.Bold,
-                    letterSpacing = 2.sp
-                )
-            }
-        } else {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val cx    = size.width  / 2f
-                val cy    = size.height / 2f
-                val arcR  = minOf(size.width, size.height) * 0.37f
-                val trackW = arcR * 0.13f
-                val startAngle    = 150f
-                val sweepTotal    = 240f
-                val progressSweep = (speedDisplay / maxSpeed).coerceIn(0f, 1f) * sweepTotal
 
-                val tl   = Offset(cx - arcR, cy - arcR)
-                val sz   = Size(arcR * 2f, arcR * 2f)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
 
-                drawArc(
-                    color      = contentColor.copy(alpha = trackAlpha),
-                    startAngle = startAngle,
-                    sweepAngle = sweepTotal,
-                    useCenter  = false,
-                    topLeft    = tl,
-                    size       = sz,
-                    style      = Stroke(width = trackW, cap = StrokeCap.Round)
-                )
+                    Row(
+                        modifier = Modifier.wrapContentWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
 
-                if (progressSweep > 0.5f) {
-                    drawArc(
-                        color      = accent,
-                        startAngle = startAngle,
-                        sweepAngle = progressSweep,
-                        useCenter  = false,
-                        topLeft    = tl,
-                        size       = sz,
-                        style      = Stroke(width = trackW, cap = StrokeCap.Round)
-                    )
-                }
+                        RollingDigit(
+                            targetDigit = hundredsText,
+                            color = contentColor,
+                            fontSize = 54.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = (-1).sp,
+                                     moveUp = false
+                        )
 
-                for (i in 0..10) {
-                    val angle   = startAngle + i * (sweepTotal / 10f)
-                    val rad     = Math.toRadians(angle.toDouble())
-                    val isMajor = i % 2 == 0
-                    val outerR  = arcR - trackW / 2f - 3.dp.toPx()
-                    val innerR  = outerR - if (isMajor) 7.dp.toPx() else 4.dp.toPx()
-                    drawLine(
-                        color       = tickBaseColor.copy(alpha = if (isMajor) tickAlphaMaj else tickAlphaMin),
-                        start       = Offset(cx + (outerR * cos(rad)).toFloat(), cy + (outerR * sin(rad)).toFloat()),
-                        end         = Offset(cx + (innerR * cos(rad)).toFloat(), cy + (innerR * sin(rad)).toFloat()),
-                        strokeWidth = if (isMajor) 1.5.dp.toPx() else 0.8.dp.toPx()
+                        RollingDigit(
+                            targetDigit = tensText,
+                            color = contentColor,
+                            fontSize = 54.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = (-1).sp,
+                                     moveUp = true
+                        )
+
+                        RollingDigit(
+                            targetDigit = onesText,
+                            color = contentColor,
+                            fontSize = 54.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = (-1).sp,
+                                     moveUp = false
+                        )
+                    }
+
+                    Spacer(Modifier.height(2.dp))
+
+                    Text(
+                        text = unitLabel,
+                         color = contentColor.copy(alpha = subAlpha * 1.5f),
+                         fontSize = 10.sp,
+                         fontWeight = FontWeight.Bold,
+                         letterSpacing = 2.sp
                     )
                 }
             }
 
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier            = Modifier.offset(y = (-4).dp)
+            // ------------------ VEHÍCULO (80%) ------------------
+            Box(
+                modifier = Modifier
+                .weight(0.7f)
+                .fillMaxHeight(),
+                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text          = "%.0f".format(speedDisplay),
-                    color         = contentColor,
-                    fontSize      = 34.sp,
-                    letterSpacing = (-1).sp
-                )
-                Text(
-                    text          = unitLabel,
-                    color         = contentColor.copy(alpha = subAlpha),
-                    fontSize      = 8.sp,
-                    letterSpacing = 2.sp
-                )
+                val isCustomUri = vehicleImage.startsWith("content://") || vehicleImage.startsWith("file://")
+                val clickModifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        if (packageName.isNotEmpty()) {
+                            val intent = context.packageManager.getLaunchIntentForPackage(packageName)
+                            intent?.let {
+                                context.startActivity(it)
+                            }
+                        }
+                    }
+
+                if (isCustomUri) {
+                    AsyncImage(
+                        model = Uri.parse(vehicleImage),
+                        contentDescription = "Vehicle",
+                        modifier = clickModifier,
+                        contentScale = ContentScale.Fit
+                    )
+                } else {
+                    val resId = when (vehicleImage) {
+                        "honda_hrv" -> R.drawable.honda_hrv
+                        "nissan_kicks" -> R.drawable.nissan_kicks
+                        else -> R.drawable.car_model
+                    }
+                    Image(
+                        painter = painterResource(resId),
+                        contentDescription = "Vehicle",
+                        modifier = clickModifier,
+                        contentScale = ContentScale.Fit
+                    )
+                }
             }
         }
     }

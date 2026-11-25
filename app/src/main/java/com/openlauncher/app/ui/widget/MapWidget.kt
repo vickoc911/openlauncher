@@ -445,7 +445,7 @@ fun MapWidget(
     // Indicador estilo Google Maps (con flecha al centro)
     val marker = remember(accent) {
         Marker(mapView).apply {
-            val size = (32 * context.resources.displayMetrics.density).toInt()
+            val size = (42 * context.resources.displayMetrics.density).toInt()
             val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
             val canvas = android.graphics.Canvas(bitmap)
 

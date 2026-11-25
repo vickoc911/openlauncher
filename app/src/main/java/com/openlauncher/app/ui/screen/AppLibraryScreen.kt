@@ -3,7 +3,6 @@ package com.openlauncher.app.ui.screen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,7 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.platform.LocalTextInputService
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,6 +52,8 @@ fun AppLibraryScreen(
     val fieldTextC    = MaterialTheme.colorScheme.onBackground
     val fieldBorderU  = if (isDayMode) Color(0xFFCCCCCC) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.2f)
 
+    val context = LocalContext.current
+    val packageManager = context.packageManager
     val anyPickerMode = isPickerMode || isCarPlayPickerMode
     var query by remember { mutableStateOf("") }
 
@@ -61,13 +62,6 @@ fun AppLibraryScreen(
             apps.filter { it.appName.contains(query, ignoreCase = true) }
         }
     }
-/*
-    val filtered by remember(apps, query) {
-        derivedStateOf {
-            apps.filter { !it.isSystemApp }
-                .filter { it.appName.contains(query, ignoreCase = true) }
-        }
-    } */
 
     Column(modifier = modifier.fillMaxSize().background(screenBg)) {
         // ── Header ─────────────────────────────────────────────────────────────

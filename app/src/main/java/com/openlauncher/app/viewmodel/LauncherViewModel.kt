@@ -1,8 +1,10 @@
 package com.openlauncher.app.viewmodel
 
 import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.database.ContentObserver
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -39,10 +41,14 @@ import com.openlauncher.app.util.LocationData
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import com.openlauncher.app.data.MapProvider
-import com.openlauncher.app.data.DailyData
 import com.google.gson.Gson
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import android.appwidget.AppWidgetHost
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProviderInfo
+
+import com.openlauncher.app.data.DailyData
 import org.osmdroid.util.GeoPoint
 import com.openlauncher.app.data.ValhallaApi
 import com.openlauncher.app.data.ValhallaRequest
@@ -52,10 +58,71 @@ import com.openlauncher.app.data.ValhallaSummary
 import com.openlauncher.app.data.ValhallaPolylineDecoder
 import com.openlauncher.app.data.RouteTracker
 
+import android.app.ActivityOptions
+import kotlin.reflect.KClass
+
 class LauncherViewModel(application: Application) : AndroidViewModel(application) {
+
+    companion object {
+        private const val APPWIDGET_HOST_ID = 1024
+    }
 
     private val settingsRepo = SettingsRepository(application)
     private val locationMgr  = LocationCompassManager(application)
+
+    // Android AppWidget Support
+    val appWidgetHost = AppWidgetHost(application, APPWIDGET_HOST_ID)
+    val appWidgetManager = AppWidgetManager.getInstance(application)
+
+    fun startListeningWidgets() { appWidgetHost.startListening() }
+    fun stopListeningWidgets()  { appWidgetHost.stopListening() }
+
+    fun addAndroidWidget(appWidgetId: Int) {
+        updateSettings {
+            val activeIds = activeWidgetIds()
+            var currentLayout = widgetLayout
+            
+            // Try to find a 2x2 area first, then fallback to 1x1 if needed
+            var targetSpanX = 2
+            var targetSpanY = 2
+            var cell = freeAreaIn(currentLayout, activeIds, targetSpanX, targetSpanY)
+
+            if (cell == null) {
+                // Try 1x1
+                targetSpanX = 1
+                targetSpanY = 1
+                cell = freeAreaIn(currentLayout, activeIds, targetSpanX, targetSpanY)
+            }
+
+            if (cell == null) {
+                // Try to shrink something to make room for at least 1x1
+                val candidate = currentLayout
+                    .filter { it.enabled && it.id in activeIds && it.spanX * it.spanY > 1 }
+                    .maxByOrNull { it.spanX * it.spanY }
+                if (candidate != null) {
+                    currentLayout = currentLayout.map { w ->
+                        if (w.id == candidate.id)
+                            if (w.spanY > 1) w.copy(spanY = w.spanY - 1) else w.copy(spanX = w.spanX - 1)
+                        else w
+                    }
+                    cell = freeAreaIn(currentLayout, activeIds, targetSpanX, targetSpanY)
+                }
+            }
+
+            val targetCell = cell ?: return@updateSettings this
+            val uniqueId = "ANDROID_WIDGET_$appWidgetId"
+            
+            val newWidget = com.openlauncher.app.data.WidgetConfig(
+                id = uniqueId,
+                gridX = targetCell.first,
+                gridY = targetCell.second,
+                spanX = targetSpanX,
+                spanY = targetSpanY,
+                appWidgetId = appWidgetId
+            )
+            copy(widgetLayout = currentLayout + newWidget)
+        }
+    }
 
     // ── Settings ──────────────────────────────────────────────────────────────
     private val _settingsLoaded = MutableStateFlow(false)
@@ -158,7 +225,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
 
     // ── CarPlay / Android Auto / Autostart picker ─────────────────────────────
-    enum class AppPickerTarget { CARPLAY, ANDROID_AUTO, PIP, RADIO, AUTOSTART_1, AUTOSTART_2, AUTOSTART_3, AUTOSTART_4 }
+    enum class AppPickerTarget { CARPLAY, ANDROID_AUTO, PIP, CAR, RADIO, AUTOSTART_1, AUTOSTART_2, AUTOSTART_3, AUTOSTART_4 }
 
     private val _appPickerTarget = MutableStateFlow<AppPickerTarget?>(null)
     val carPlayPickerActive: StateFlow<Boolean> = MutableStateFlow(false) // kept for compat
@@ -176,6 +243,11 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     fun startPipPicker() {
         _appPickerTarget.value = AppPickerTarget.PIP
+        _nav.value = NavDestination.APP_LIBRARY
+    }
+
+    fun startCarPicker() {
+        _appPickerTarget.value = AppPickerTarget.CAR
         _nav.value = NavDestination.APP_LIBRARY
     }
 
@@ -209,6 +281,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             AppPickerTarget.CARPLAY      -> updateSettings { copy(carPlayPackage = app.packageName) }
             AppPickerTarget.ANDROID_AUTO -> updateSettings { copy(androidAutoPackage = app.packageName) }
             AppPickerTarget.PIP          -> updateSettings { copy(pipAppPackage = app.packageName) }
+            AppPickerTarget.CAR          -> updateSettings { copy(carAppPackage = app.packageName) }
             AppPickerTarget.RADIO        -> updateSettings { copy(radioPackage = app.packageName) }
             AppPickerTarget.AUTOSTART_1  -> assignAutostart(0, app.packageName)
             AppPickerTarget.AUTOSTART_2  -> assignAutostart(1, app.packageName)
@@ -223,6 +296,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun clearCarPlayApp()      { updateSettings { copy(carPlayPackage = "") } }
     fun clearAndroidAutoApp()  { updateSettings { copy(androidAutoPackage = "") } }
     fun clearPipApp()          { updateSettings { copy(pipAppPackage = "") } }
+    fun setPipAppPackage()     { updateSettings { copy(pipAppPackage = pipAppPackage) } }
     fun clearRadioApp()        { updateSettings { copy(radioPackage = "") } }
     fun clearAutostartApp(index: Int) {
         updateSettings {
@@ -297,20 +371,23 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 "TRIP_TRACKER" -> copy(showTripTracker = true)
                 "SOUNDBOARD"  -> copy(showSoundboard = true)
                 "MAP" -> copy(showMap = true)
+                "PIP" -> copy(showPip = true)
                 else          -> this
             }
             val idx       = layout.indexOfFirst { it.id == id }
             val newLayout = if (idx >= 0) layout.toMutableList().also { list ->
                 val w = list[idx]
-                // Try to keep the widget's previous span; if no free area fits it,
-                // fall back to 1×1 at the free cell so it can't overlap neighbors
-                val area = if (w.spanX > 1 || w.spanY > 1) freeAreaIn(layout, activeIds, w.spanX, w.spanY) else null
+                val targetSpanX = if (id == "PIP") 4 else w.spanX
+                val targetSpanY = if (id == "PIP") 4 else w.spanY
+                
+                val area = if (targetSpanX > 1 || targetSpanY > 1) freeAreaIn(layout, activeIds, targetSpanX, targetSpanY) else null
                 list[idx] = if (area != null)
-                    w.copy(enabled = true, gridX = area.first, gridY = area.second)
+                    w.copy(enabled = true, gridX = area.first, gridY = area.second, spanX = targetSpanX, spanY = targetSpanY)
                 else
                     w.copy(enabled = true, gridX = cell_.first, gridY = cell_.second, spanX = 1, spanY = 1)
             } else {
-                layout + com.openlauncher.app.data.WidgetConfig(id, cell_.first, cell_.second)
+                val span = if (id == "PIP") 4 else 1
+                layout + com.openlauncher.app.data.WidgetConfig(id, cell_.first, cell_.second, spanX = span, spanY = span)
             }
             withShow.copy(widgetLayout = newLayout)
         }
@@ -334,6 +411,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    // maps valhalla
+
     fun calculateRoute(startLat: Double, startLon: Double, destLat: Double, destLon: Double, name: String?) {
         destinationCoords = Pair(destLat, destLon)
         viewModelScope.launch(Dispatchers.IO) {
@@ -341,7 +420,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 val req = ValhallaRequest(
                     locations = listOf(
                         ValhallaLocation(startLat, startLon),
-                        ValhallaLocation(destLat, destLon)
+                                       ValhallaLocation(destLat, destLon)
                     )
                 )
                 val response = ValhallaApi.service.getRoute(req)
@@ -388,7 +467,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     fun removeWidget(id: String) {
         updateSettings {
-            when (id) {
+            val withShowRemoved = when (id) {
                 "CLOCK"       -> copy(showClock = false)
                 "WEATHER"     -> copy(showWeather = false)
                 "NOW_PLAYING" -> copy(showNowPlaying = false)
@@ -399,8 +478,29 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 "TRIP_TRACKER" -> copy(showTripTracker = false)
                 "SOUNDBOARD"  -> copy(showSoundboard = false)
                 "MAP" -> copy(showMap = false)
+                "PIP" -> copy(showPip = false)
                 else          -> this
             }
+            
+            // For custom Android widgets, remove them entirely from the list
+            // For built-in widgets, just set enabled = false
+            val isCustom = id.startsWith("ANDROID_WIDGET_")
+            val newLayout = if (isCustom) {
+                withShowRemoved.widgetLayout.filter { w ->
+                    if (w.id == id) {
+                        w.appWidgetId?.let { appWidgetHost.deleteAppWidgetId(it) }
+                        false
+                    } else true
+                }
+            } else {
+                withShowRemoved.widgetLayout.map { w ->
+                    if (w.id == id) {
+                        w.appWidgetId?.let { appWidgetHost.deleteAppWidgetId(it) }
+                        w.copy(enabled = false)
+                    } else w
+                }
+            }
+            withShowRemoved.copy(widgetLayout = newLayout)
         }
     }
 
@@ -457,49 +557,113 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private val _appsLoading = MutableStateFlow(false)
     val appsLoading: StateFlow<Boolean> = _appsLoading
 
+    private val packageReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            loadInstalledApps()
+        }
+    }
+
+    private fun registerPackageReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addDataScheme("package")
+        }
+        getApplication<Application>().registerReceiver(packageReceiver, filter)
+    }
+
+    private fun unregisterPackageReceiver() {
+        try {
+            getApplication<Application>().unregisterReceiver(packageReceiver)
+        } catch (_: Exception) {}
+    }
+
     fun loadInstalledApps() {
         if (_appsLoading.value) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _appsLoading.value = true
+            val pm = getApplication<Application>().packageManager
 
-            viewModelScope.launch(Dispatchers.IO) {
-                _appsLoading.value = true
-
-                val pm = getApplication<Application>().packageManager
-
-                // Todas las apps que tienen icono en algún launcher
-                val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
-                    addCategory(Intent.CATEGORY_LAUNCHER)
-                }
-
-                val launcherPackages = pm.queryIntentActivities(launcherIntent, 0)
-                .map { it.activityInfo.packageName }
-                .toSet()
-
-                _apps.value = pm.getInstalledApplications(0)
-                .filter { appInfo ->
-                    launcherPackages.contains(appInfo.packageName)
-                }
-                .mapNotNull { appInfo ->
-                    try {
-                        val label = pm.getApplicationLabel(appInfo).toString()
-
-                        AppInfo(
-                            packageName = appInfo.packageName,
-                            appName = label,
-                            icon = pm.getApplicationIcon(appInfo),
-                                isSystemApp = (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
-                        )
-                    } catch (_: Exception) {
-                        null
-                    }
-                }
-                .distinctBy { it.packageName }
-                .sortedBy { it.appName.lowercase() }
-
-                _appsLoading.value = false
+            // Query specifically for apps with a Launcher interface (Graphical UI)
+            // This captures both User and System apps (like Chrome, Maps, YouTube)
+            val intent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
+            val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.queryIntentActivities(intent, android.content.pm.PackageManager.ResolveInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryIntentActivities(intent, 0)
             }
+
+            _apps.value = resolveInfos.mapNotNull { info ->
+                try {
+                    AppInfo(
+                        packageName = info.activityInfo.packageName,
+                        appName     = info.loadLabel(pm).toString(),
+                        icon        = info.loadIcon(pm),
+                        isSystemApp = (info.activityInfo.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+                    )
+                } catch (_: Exception) { null }
+            }
+            .distinctBy { it.packageName }
+            .sortedBy { it.appName }
+            _appsLoading.value = false
+        }
     }
 
     fun launchApp(packageName: String) {
+        if (packageName.isEmpty()) return
+
+            val app = getApplication<Application>()
+            val pm = app.packageManager
+
+            // 1. APAGAR EL MODO EMBEBIDO DE SYU ANTES DE ABRIR OTRA APP
+            try {
+                Runtime.getRuntime().exec(arrayOf("setprop", "persist.launcher.embedded_window", "0"))
+                Runtime.getRuntime().exec(arrayOf("setprop", "persist.launcher.embedded_notouch", "0"))
+
+                // Enviar broadcast de cierre/limpieza a SYU
+                val closeIntent = Intent("com.syu.pip.action.CLOSE")
+                app.sendBroadcast(closeIntent)
+            } catch (e: Exception) {
+                android.util.Log.e("LauncherVM", "Error apagando SYU embedded mode: ${e.message}")
+            }
+
+            // 2. Obtener intent y lanzar la app en pantalla completa (Display 0)
+            val intent = pm.getLaunchIntentForPackage(packageName)
+            ?: pm.queryIntentActivities(
+                Intent(Intent.ACTION_MAIN).setPackage(packageName), 0
+            ).firstOrNull()?.activityInfo?.let { ai ->
+                Intent(Intent.ACTION_MAIN).apply {
+                    setClassName(ai.packageName, ai.name)
+                }
+            }
+
+            intent?.let {
+                runCatching {
+                    it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    it.addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+
+                    val options = ActivityOptions.makeBasic()
+                    try {
+                        val setLaunchDisplayIdMethod = ActivityOptions::class.java.getMethod(
+                            "setLaunchDisplayId",
+                            Int::class.javaPrimitiveType
+                        )
+                        setLaunchDisplayIdMethod.invoke(options, 0)
+                    } catch (e: Exception) {
+                        android.util.Log.e("LauncherVM", "Error setLaunchDisplayId: ${e.message}")
+                    }
+
+                    app.startActivity(it, options.toBundle())
+                }.onFailure { e ->
+                    android.util.Log.e("LauncherVM", "Failed to launch app: $packageName", e)
+                }
+            }
+    }
+
+ /*   fun launchApp(packageName: String) {
         val app = getApplication<Application>()
         val pm  = app.packageManager
         // Try standard launch intent first; fall back to first ACTION_MAIN activity in package
@@ -512,14 +676,14 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
             }
-        intent?.let {
+        intent?.let { 
             runCatching {
                 app.startActivity(it)
             }.onFailure { e ->
                 android.util.Log.e("LauncherVM", "Failed to launch app: $packageName", e)
             }
         }
-    }
+    } */
 
     // ── Now Playing ───────────────────────────────────────────────────────────
     val nowPlaying: StateFlow<NowPlayingState?> = MediaListenerService.nowPlaying
@@ -534,23 +698,39 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     else
                         ctrl.transportControls?.play()
             } else {
-                playLastOrOpenActive(context)
+                // FYT nativo: enviar la tecla play/pause (no abrir la app)
+                MediaListenerService.playPause(context)
             }
         }
 
-    fun skipNext() { nowPlaying.value?.controller?.transportControls?.skipToNext() }
-    fun skipPrev() { nowPlaying.value?.controller?.transportControls?.skipToPrevious() }
+    fun skipNext() {
+        val ctrl = nowPlaying.value?.controller
+        if (ctrl != null) {
+            ctrl.transportControls?.skipToNext()
+        } else {
+            MediaListenerService.next(getApplication())
+        }
+    }
+
+    fun skipPrev() {
+        val ctrl = nowPlaying.value?.controller
+        if (ctrl != null) {
+            ctrl.transportControls?.skipToPrevious()
+        } else {
+            MediaListenerService.previous(getApplication())
+        }
+    }
 
     private fun getFallbackMusicPackage(context: Context): String {
         val pm = context.packageManager
         val candidates = listOf(
-            "com.jetappfactory.jetaudio",
-            "com.maxmpz.audioplayer",
             "com.spotify.music",
             "com.google.android.apps.youtube.music",
             "com.apple.android.music",
             "org.videolan.vlc",
             "com.pandora.android",
+            "com.jetappfactory.jetaudio",
+            "com.maxmpz.audioplayer",
             "com.deezer.android"
         )
         for (pkg in candidates) {
@@ -569,97 +749,28 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             getFallbackMusicPackage(context)
         }
 
-        // 1. Lanzar la App visualmente
+        // Launch the app
         if (pkg.isNotEmpty()) {
             val intent = context.packageManager.getLaunchIntentForPackage(pkg)
             if (intent != null) {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(intent)
             }
-
-            // TRUCO PARA HIBERNACIÓN: Enviar un Intent directo para despertar su servicio de música subyacente
-            try {
-                val mediaIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
-                    `package` = pkg
-                    putExtra(Intent.EXTRA_KEY_EVENT, android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY))
-                }
-                context.sendBroadcast(mediaIntent)
-            } catch (_: Exception) {}
         }
 
-        // 2. Controlar la reproducción forzando el despertar
+        // Start playback if not already playing
         if (state?.isPlaying != true) {
-
-            // Si hay controlador, intentamos usarlo de inmediato por si acaso
             if (controller != null) {
-                try {
-                    controller.transportControls?.play()
-                } catch (_: Exception) {}
-            }
-
-            // RESPALDÓ AGRESIVO CON RETRASO: Usamos una corrutina ligera (o un Handler)
-            // para lanzar las llaves del AudioManager 300ms después.
-            // Esto le da tiempo a la app suspendida de registrarse de nuevo en el sistema de audio.
-            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-
-            // Ejecutamos en el hilo principal con un leve desfase para asegurar el tiro
-            context.mainExecutor.execute {
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    try {
-                        val eventDown = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
-                        audioManager.dispatchMediaKeyEvent(eventDown)
-                        val eventUp = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
-                        audioManager.dispatchMediaKeyEvent(eventUp)
-                    } catch (_: Exception) {}
-                }, 350) // 350 milisegundos son imperceptibles para el usuario pero una eternidad para el procesador
+                controller.transportControls?.play()
+            } else {
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                val eventDown = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
+                audioManager.dispatchMediaKeyEvent(eventDown)
+                val eventUp = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
+                audioManager.dispatchMediaKeyEvent(eventUp)
             }
         }
     }
-
- /*   fun playLastOrOpenActive(context: Context) {
-        val state = nowPlaying.value
-        val controller = state?.controller
-        val pkg = controller?.packageName ?: MediaListenerService.lastMediaPackage.ifEmpty {
-            getFallbackMusicPackage(context)
-        }
-
-        if (pkg.isEmpty()) return
-
-            // Caso 1: Si milagrosamente el controlador existe pero no estaba reproduciendo
-            if (controller != null) {
-                if (state?.isPlaying != true) {
-                    controller.transportControls?.play()
-                }
-                return
-            }
-
-            // Caso 2: El carro se reinició (controller == null). Forzamos el despertar de la app específica.
-            try {
-                // Enviamos el comando PLAY apuntando DIRECTAMENTE a la app que queremos despertar
-                val eventDown = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
-                val intentDown = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
-                    `package` = pkg
-                    putExtra(Intent.EXTRA_KEY_EVENT, eventDown)
-                }
-                context.sendBroadcast(intentDown)
-
-                val eventUp = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
-                val intentUp = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
-                    `package` = pkg
-                    putExtra(Intent.EXTRA_KEY_EVENT, eventUp)
-                }
-                context.sendBroadcast(intentUp)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-
-            // Como respaldo absoluto (si la app estaba profundamente dormida), abrimos su interfaz
-            val intent = context.packageManager.getLaunchIntentForPackage(pkg)
-            if (intent != null) {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-                context.startActivity(intent)
-            }
-    } */
 
     // ── Weather ───────────────────────────────────────────────────────────────
     private val _weather = MutableStateFlow<WeatherState?>(null)
@@ -1014,6 +1125,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     override fun onCleared() {
         super.onCleared()
+        unregisterPackageReceiver() // <- Desregistrar al destruir el ViewModel
+      //  getApplication<Application>().unregisterReceiver(packageReceiver)
         locationMgr.stop()
         radioObserver?.let { getApplication<Application>().contentResolver.unregisterContentObserver(it) }
         radioObserver = null
@@ -1022,70 +1135,73 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     init {
         loadInstalledApps()
+        registerPackageReceiver() // <- Registrar al iniciar
         refreshConnectivity()
         startSignalListeners()
         if (hasSzchoicewayMcu) startHardwareRadioObserver()
-        // Fetch weather on first location fix, then every 30 minutes.
-        // The minute ticker covers the parked case where no location updates arrive.
-        viewModelScope.launch {
-            var lastFetchMs = 0L
-            merge(
-                locationMgr.location.filterNotNull(),
-                minuteTicker.mapNotNull { locationMgr.location.value }
-            ).collect { loc ->
-                val now = System.currentTimeMillis()
-                if (now - lastFetchMs >= 30 * 60 * 1_000L) {
-                    lastFetchMs = now
-                    fetchWeather(loc.latitude, loc.longitude, settings.value.unitSystem.name == "METRIC")
+            // Fetch weather on first location fix, then every 30 minutes.
+            // The minute ticker covers the parked case where no location updates arrive.
+            viewModelScope.launch {
+                var lastFetchMs = 0L
+                merge(
+                    locationMgr.location.filterNotNull(),
+                      minuteTicker.mapNotNull { locationMgr.location.value }
+                ).collect { loc ->
+                    val now = System.currentTimeMillis()
+                    if (now - lastFetchMs >= 30 * 60 * 1_000L) {
+                        lastFetchMs = now
+                        fetchWeather(loc.latitude, loc.longitude, settings.value.unitSystem.name == "METRIC")
+                    }
                 }
             }
-        }
-        viewModelScope.launch {
-            locationMgr.location.filterNotNull().collect { loc ->
-                if (_isNavigating.value) {
-                    val points = _activeRoutePoints.value
-                    if (points != null && points.size >= 2) {
-                        val currentLoc = GeoPoint(loc.latitude, loc.longitude)
-                        val closestIdx = RouteTracker.findClosestSegmentIndex(currentLoc, points)
-                        
-                        // Check if user is off-route (e.g. > 70 meters)
-                        val distToRoute = RouteTracker.getDistanceToSegment(currentLoc, points[closestIdx], points[closestIdx + 1])
-                        if (distToRoute > 70.0) {
-                            val dest = destinationCoords
-                            if (dest != null) {
-                                calculateRoute(loc.latitude, loc.longitude, dest.first, dest.second, _destinationName.value)
-                                // Trigger navigation automatically on the recalculated route
-                                _isNavigating.value = true
+
+            // para maps
+            viewModelScope.launch {
+                locationMgr.location.filterNotNull().collect { loc ->
+                    if (_isNavigating.value) {
+                        val points = _activeRoutePoints.value
+                        if (points != null && points.size >= 2) {
+                            val currentLoc = GeoPoint(loc.latitude, loc.longitude)
+                            val closestIdx = RouteTracker.findClosestSegmentIndex(currentLoc, points)
+
+                            // Check if user is off-route (e.g. > 70 meters)
+                            val distToRoute = RouteTracker.getDistanceToSegment(currentLoc, points[closestIdx], points[closestIdx + 1])
+                            if (distToRoute > 70.0) {
+                                val dest = destinationCoords
+                                if (dest != null) {
+                                    calculateRoute(loc.latitude, loc.longitude, dest.first, dest.second, _destinationName.value)
+                                    // Trigger navigation automatically on the recalculated route
+                                    _isNavigating.value = true
+                                }
+                                return@collect
                             }
-                            return@collect
-                        }
-                        
-                        // Determine segment bearing for the arrow
-                        val segBearing = RouteTracker.getRouteSegmentBearing(points[closestIdx], points[closestIdx + 1])
-                        _routeBearing.value = segBearing
-                        
-                        // Update active maneuver based on closest segment index
-                        val maneuvers = _routeManeuvers.value
-                        if (maneuvers != null) {
-                            val activeManeuver = maneuvers.firstOrNull { m ->
-                                closestIdx >= m.beginShapeIndex && closestIdx <= m.endShapeIndex
-                            } ?: maneuvers.lastOrNull()
-                            
-                            _currentManeuver.value = activeManeuver
-                            
-                            if (activeManeuver != null) {
-                                val targetPoint = points.getOrNull(activeManeuver.endShapeIndex)
-                                if (targetPoint != null) {
-                                    val distanceToManeuverEnd = currentLoc.distanceToAsDouble(targetPoint)
-                                    _distanceToManeuver.value = distanceToManeuverEnd
+
+                            // Determine segment bearing for the arrow
+                            val segBearing = RouteTracker.getRouteSegmentBearing(points[closestIdx], points[closestIdx + 1])
+                            _routeBearing.value = segBearing
+
+                            // Update active maneuver based on closest segment index
+                            val maneuvers = _routeManeuvers.value
+                            if (maneuvers != null) {
+                                val activeManeuver = maneuvers.firstOrNull { m ->
+                                    closestIdx >= m.beginShapeIndex && closestIdx <= m.endShapeIndex
+                                } ?: maneuvers.lastOrNull()
+
+                                _currentManeuver.value = activeManeuver
+
+                                if (activeManeuver != null) {
+                                    val targetPoint = points.getOrNull(activeManeuver.endShapeIndex)
+                                    if (targetPoint != null) {
+                                        val distanceToManeuverEnd = currentLoc.distanceToAsDouble(targetPoint)
+                                        _distanceToManeuver.value = distanceToManeuverEnd
+                                    }
                                 }
                             }
                         }
+                    } else {
+                        _routeBearing.value = null
                     }
-                } else {
-                    _routeBearing.value = null
                 }
             }
-        }
     }
 }

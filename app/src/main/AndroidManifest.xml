@@ -1,39 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<!-- <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          android:sharedUserId="android.uid.system"> -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" android:sharedUserId="android.uid.system">
 
-    <!-- Network for weather API -->
+    <!-- Conectividad -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
-    <!-- Broadcast permission for MCU head unit event service -->
+    <!-- Permisos para el MCU y la radio FYT/SYU -->
     <uses-permission android:name="com.szchoiceway.permission.broadcast" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
-    <!-- GPS for telemetry and weather location -->
+    <!-- Ubicación -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <!-- Required for LocationManager.sendExtraCommand (A-GPS reset) — normal protection, auto-granted -->
     <uses-permission android:name="android.permission.ACCESS_LOCATION_EXTRA_COMMANDS" />
 
-    <!-- Compass / sensors -->
+    <!-- Control de Medios y Sensores -->
     <uses-permission android:name="android.permission.BODY_SENSORS" />
-
-    <!-- Media session control (requires notification access grant by user) -->
     <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" />
 
-    <!-- Wallpaper from gallery -->
+    <!-- PERMISOS DE SISTEMA (Habilitados gracias a android.uid.system) -->
+    <uses-permission android:name="android.permission.INJECT_EVENTS" />
+    <uses-permission android:name="android.permission.MANAGE_ACTIVITY_STACKS" />
+    <uses-permission android:name="android.permission.MANAGE_ACTIVITY_TASKS" />
+    <uses-permission android:name="android.permission.REORDER_TASKS" />
+    <uses-permission android:name="android.permission.REMOVE_TASKS" />
+    <uses-permission android:name="android.permission.REAL_GET_TASKS" />
+    <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
+    <uses-permission android:name="android.permission.START_ANY_ACTIVITY" />
+    <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
+    <uses-permission android:name="android.permission.START_TASKS_FROM_RECENTS" />
+    <uses-permission android:name="android.permission.ACTIVITY_EMBEDDING" />
+    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS" />
+    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS_FULL" />
+    <!-- Para permitir la creación y forzar actividades dentro de Displays Secundarios en SoC SYU -->
+    <uses-permission android:name="android.permission.ADD_TRUSTED_DISPLAY" />
+
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+
+    <!-- Almacenamiento / USB -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
-    <!-- Query all packages required on API 30+ for getInstalledApplications -->
+    <!-- Consultas de paquetes y Widgets -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.BIND_APPWIDGET" />
 
-    <!-- Required on API 30+ so PackageManager returns ALL launcher apps -->
+    <!-- Unificación de consultas de Intents y Paquetes de FYT/SYU -->
     <queries>
+        <package android:name="com.syu.ms" />
+        <package android:name="syu.widget.music" />
+        <package android:name="com.syu.music" />
+        <package android:name="com.syu.media" />
+
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="com.syu.ms.toolkit" />
         </intent>
     </queries>
 
@@ -44,18 +74,21 @@
         android:supportsRtl="true"
         android:hardwareAccelerated="true"
         android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
-        android:exported="true">
+        android:exported="true"
+        android:resizeableActivity="true"
+        android:supportsPictureInPicture="true">
 
-        <!-- Single launcher activity -->
+        <!-- Actividad Principal (Launcher HOME) -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout"
             android:windowSoftInputMode="adjustNothing">
 
-            <!-- HOME launcher intent filters -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
@@ -64,7 +97,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Notification listener service for MediaSession / Now Playing -->
+        <!-- Servicio Escuchador de Notificaciones y MediaSession -->
         <service
             android:name=".service.MediaListenerService"
             android:exported="true"
@@ -74,6 +107,51 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Receptor estático para capturar la metadata de Radio, BT y Música USB de FYT/SYU -->
+        <receiver
+            android:name=".service.FytBroadcastReceiver"
+            android:exported="true">
+            <intent-filter>
+                <!-- Radio -->
+                <action android:name="com.syu.radio.send" />
+                <action android:name="com.syu.radio" />
+                <action android:name="com.syu.radio.freq" />
+                <action android:name="com.syu.radio.playinfo" />
+                <action android:name="syu.widget.radio.playinfo" />
+                <action android:name="action.colormusic.radio" />
+
+                <!-- Música USB / Local / BT -->
+                <action android:name="com.syu.music.send" />
+                <action android:name="com.syu.music" />
+                <action android:name="com.syu.music.playstate" />
+                <action android:name="com.syu.music.info" />
+                <action android:name="com.syu.music.title" />
+                <action android:name="com.syu.music.albumart" />
+                <action android:name="com.syu.music.playinfo" />
+                <action android:name="com.syu.music.metachanged" />
+
+                <!-- Mismo protocolo con paquete com.syu.media (Junsun V1) -->
+                <action android:name="com.syu.media" />
+                <action android:name="com.syu.media.send" />
+                <action android:name="com.syu.media.playstate" />
+                <action android:name="com.syu.media.info" />
+                <action android:name="com.syu.media.title" />
+                <action android:name="com.syu.media.albumart" />
+                <action android:name="com.syu.media.playinfo" />
+                <action android:name="com.syu.media.metachanged" />
+
+                <action android:name="syu.widget.music.playinfo" />
+                <action android:name="com.syu.bt.music" />
+                <action android:name="com.syu.bt.playinfo" />
+                <action android:name="com.android.music.metachanged" />
+                <action android:name="com.android.music.playstatechanged" />
+                <action android:name="action.colormusic.title" />
+
+                <!-- General FYT Launcher -->
+                <action android:name="com.syu.launcher.send" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

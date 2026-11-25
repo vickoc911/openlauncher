@@ -64,6 +64,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.draw.paint
+import androidx.compose.ui.res.painterResource
+import com.openlauncher.app.R
+
+// icono play pause
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+
 
 
 
@@ -91,7 +104,8 @@ fun NowPlayingWidget(
     onRadioCycleFm: () -> Unit = {},
     onRadioSwitchAm: () -> Unit = {},
     onRadioTune: (band: String, freq: Float) -> Unit = { _, _ -> },
-    onAssignRadio: () -> Unit = {}
+    onAssignRadio: () -> Unit = {},
+    coverBackground: Boolean = false
 ) {
     val context     = LocalContext.current
     val isConnected by MediaListenerService.isConnected.collectAsState()
@@ -155,7 +169,8 @@ fun NowPlayingWidget(
                 onLaunchCarPlay = onLaunchCarPlay,
                 onLaunchAndroidAuto = onLaunchAndroidAuto,
                 onTapToOpenApp = onTapToOpenApp,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                coverBackground = coverBackground
             )
         }
 
@@ -234,22 +249,23 @@ private fun WaveProgressIndicator(
                  cap = StrokeCap.Round
         )
 
-        // Onda con movimiento inverso
         if (progressX > 0f) {
-            val amplitude = 4.dp.toPx()
-            val wavelength = 24.dp.toPx()
+            // --- CAMBIOS DE ESCALADO DINÁMICO ---
+            // La amplitud ahora se adapta a la altura del Canvas (ej. 30% del alto total)
+            val amplitude = (size.height * 0.3f).coerceAtLeast(4.dp.toPx())
+
+            // La longitud de onda se adapta proporcionalmente a la amplitud o al alto
+            val wavelength = amplitude * 10f
             val step = 2.dp.toPx()
 
             val wavePath = Path().apply {
                 moveTo(0f, centerY)
                 var x = 0f
                 while (x <= progressX) {
-                    // Esto hace que los frentes de onda viajen desde el indicador hacia el inicio (atrás)
                     val y = centerY + amplitude * sin(((x / wavelength) * (2f * Math.PI).toFloat()) + phaseShift)
                     lineTo(x, y)
                     x += step
                 }
-                // Asegurar el cierre exacto en la posición de la burbuja
                 val finalY = centerY + amplitude * sin(((progressX / wavelength) * (2f * Math.PI).toFloat()) + phaseShift)
                 lineTo(progressX, finalY)
             }
@@ -264,12 +280,11 @@ private fun WaveProgressIndicator(
                 )
             )
 
-            // Indicador (Círculo naranja) acoplado a la onda revertida
             val indicatorY = centerY + amplitude * sin(((progressX / wavelength) * (2f * Math.PI).toFloat()) + phaseShift)
 
             drawCircle(
                 color = color,
-                radius = 5.dp.toPx(),
+                radius = (size.height * 0.25f).coerceAtLeast(5.dp.toPx()), // Radio escalado proporcionalmente
                        center = Offset(progressX, indicatorY)
             )
         }
@@ -290,7 +305,7 @@ fun WeatherWidgetAudio(
     val isMetric = settings.unitSystem.name == "METRIC"
 
     val contentColor = Color.White
-    val subColor     = Color(0xFF888888)
+    val subColor     = Color(0xFFCCCCCC)
 
     // Obtenemos la fecha de hoy del sistema
     val todayString = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
@@ -308,10 +323,17 @@ fun WeatherWidgetAudio(
         } else {
             todayWeather.temperatureDisplay(isMetric) // Promedio offline
           }
+
         Row(
             modifier = modifier
             .clip(RoundedCornerShape(60.dp))
             .background(Color.Black.copy(alpha = 0.50f))
+         //  .size(60.dp, 10.dp)
+         //  .height(80.dp)
+           .paint(
+               painter = painterResource(id = R.drawable.bg_weather),
+                  contentScale = ContentScale.Crop // Ajusta la imagen para que llene el Box
+           )
             .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -679,10 +701,11 @@ private fun StandardMinimalPlayer(
     onLaunchCarPlay: () -> Unit,
     onLaunchAndroidAuto: () -> Unit,
     onTapToOpenApp: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    coverBackground: Boolean = false
 ) {
     val context = LocalContext.current
-    
+
     // UI Theme colors
     val idleIconColor = if (isDayMode) Color(0xFF555555) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.30f)
     val idleTextColor = if (isDayMode) Color(0xFF555555) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.30f)
@@ -791,27 +814,44 @@ private fun StandardMinimalPlayer(
         } else {
             // Non-null playing track state
             val nonNullState = state!!
+            // La clave incluye el bitmap: la carátula llega DESPUÉS del
+            // cambio de título (ID3 extraído ~200 ms más tarde); sin ella,
+            // el remember capturaba la portada anterior y no se actualizaba
+            // aunque llegara el bitmap nuevo con el mismo título.
             val artworkModel by remember(
                 nonNullState.artUri,
                 nonNullState.title,
-                nonNullState.artist
+                nonNullState.artist,
+                nonNullState.albumArt
             ) {
                 mutableStateOf(
                     nonNullState.artUri ?: nonNullState.albumArt
                 )
             }
-            var positionMs by remember { mutableLongStateOf(nonNullState.controller?.playbackState?.position ?: 0L) }
-            val durationMs = nonNullState.controller?.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
-
-            LaunchedEffect(nonNullState.isPlaying, nonNullState.title) {
-                while (nonNullState.isPlaying) {
-                    positionMs = nonNullState.controller?.playbackState?.position ?: positionMs
-                    delay(500)
+            val controller = nonNullState.controller
+            // Apps externas: el MediaController muta playbackState en segundo
+            // plano, así que se encuesta cada 500 ms.
+            var externalPosition by remember(controller) {
+                mutableLongStateOf(controller?.playbackState?.position ?: 0L)
+            }
+            if (controller != null) {
+                LaunchedEffect(controller, nonNullState.isPlaying, nonNullState.title) {
+                    while (nonNullState.isPlaying) {
+                        externalPosition = controller.playbackState?.position ?: externalPosition
+                        delay(500)
+                    }
                 }
             }
+            // FYT (controller == null): la posición llega en cada
+            // NowPlayingState (ticker del binder del reproductor, 1 s). Se lee
+            // de la composición —no de un closure del LaunchedEffect— para no
+            // quedarse con la instancia de estado del arranque.
+            val positionMs = controller?.let { externalPosition } ?: nonNullState.positionMs
+            val durationMs = controller?.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)
+                ?: nonNullState.durationMs
 
             // Draw Album Art as background with smooth blur overlay if present
-            val hasAlbumArt = nonNullState.albumArt != null
+            val hasAlbumArt = nonNullState.albumArt != null || nonNullState.artUri != null
             val useDarkTheme = hasAlbumArt || !isDayMode
 
             val currentTextColor = if (hasAlbumArt) Color.White else if (isDayMode) Color(0xFF111111) else MaterialTheme.colorScheme.onBackground
@@ -819,26 +859,81 @@ private fun StandardMinimalPlayer(
             val currentProgressColor = if (useDarkTheme) accent else if (isDayMode) Color(0xFF111111) else accent
             val currentProgressTrack = currentTextColor.copy(alpha = 0.35f)
             val currentIconColor = currentTextColor.copy(alpha = 0.75f)
-            val currentPlayBgColor = if (useDarkTheme) accent.copy(alpha = 0.9f) else if (isDayMode) Color(0xFF111111) else accent.copy(alpha = 0.9f)
-            val currentPlayIconColor = if (useDarkTheme) Color.White else Color.Black
+            val currentPlayBgColor = accent.copy(alpha = 0.4f)
+            val currentPlayIconColor = if (useDarkTheme) Color.White.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.5f)
 
             if (hasAlbumArt) {
-                // Prefer the full-resolution art URI when the source app provides
-                // one — the metadata bitmap is often a downscaled notification
-                // thumbnail that looks soft stretched across the widget. Falls back
-                // to the bitmap if the URI fails to load, and renders with high
-                // filter quality so upscaling stays smooth either way.
-                coil.compose.AsyncImage(
-                    model = artworkModel,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
-                    error = nonNullState.albumArt?.let {
-                        androidx.compose.ui.graphics.painter.BitmapPainter(it.asImageBitmap())
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (coverBackground) {
+                    // Opción "Agregar fondo a cover": carátula contenida (Fit)
+                    // con el template decorativo de fondo.
+                    coil.compose.AsyncImage(
+                        model = artworkModel,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit, // Escalado proporcional para mantener la relación de aspecto original
+                        filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
+                        alignment = Alignment.Center,     // Centrado perfecto (H y V) en todo el alto disponible
+                                            error = nonNullState.albumArt?.let {
+                                                androidx.compose.ui.graphics.painter.BitmapPainter(it.asImageBitmap())
+                                            },
+                                            modifier = Modifier
+                                            .fillMaxWidth()
+                                            .fillMaxHeight() // Ocupa todo el alto disponible para poder centrarse verticalmente en la pantalla
+                                            .offset(y = (-2).dp) // <-- Desplaza la imagen 2dp hacia arriba
+                    )
+                    // fondo  template music
+                    androidx.compose.foundation.Image(
+                        painter = androidx.compose.ui.res.painterResource(
+                            id = if (isDayMode) com.openlauncher.app.R.drawable.cover_music_template_white else com.openlauncher.app.R.drawable.cover_music_template
+                        ),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                                                      contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                      alpha = 0.99f
+                    )
+                } else {
+                    // Sin fondo: carátula a sangre completa (Crop).
+                    // Prefer the full-resolution art URI when the source app provides
+                    // one — the metadata bitmap is often a downscaled notification
+                    // thumbnail that looks soft stretched across the widget. Falls back
+                    // to the bitmap if the URI fails to load, and renders with high
+                    // filter quality so upscaling stays smooth either way.
+                    coil.compose.AsyncImage(
+                        model = artworkModel,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
+                        error = nonNullState.albumArt?.let {
+                            androidx.compose.ui.graphics.painter.BitmapPainter(it.asImageBitmap())
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
                 // Gradient dimming layer overlay (10% top -> 25% middle -> 75% bottom)
+                Box(
+                    modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.00f), // Arriba: Casi transparente
+                                            Color.Black.copy(alpha = 0.25f), // En medio: Oscurecimiento leve
+                                            Color.Black.copy(alpha = if (coverBackground) 0.40f else 0.75f)  // Abajo: Muy oscuro para controles/texto
+                            )
+                        )
+                    )
+                )
+            } else {
+                // Sin carátula: fondo no_music
+                androidx.compose.foundation.Image(
+                    painter = androidx.compose.ui.res.painterResource(
+                        id = com.openlauncher.app.R.drawable.cover
+                    ),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    alpha = 0.99f
+                )
+
                 Box(
                     modifier = Modifier
                     .fillMaxSize()
@@ -927,26 +1022,41 @@ private fun StandardMinimalPlayer(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        // button Prev
+                        // Botón Anterior
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                            .size(40.dp)
+                            .size(50.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color.White.copy(alpha = 0.18f))
                             .clickable(enabled = !isEditing) { onPrev() }
                         ) {
-                            Icon(Icons.Default.SkipPrevious, "Prev", tint = currentIconColor, modifier = Modifier.size(30.dp))
+                            Icon(
+                                imageVector = Icons.Default.SkipPrevious,
+                                 contentDescription = "Prev",
+                                 tint = currentIconColor,
+                                 modifier = Modifier.size(40.dp)
+                            )
                         }
 
-                        // button play and pause
+                        val ringThickness = 6.dp
+
+                        // Botón Play / Pause
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                            .size(54.dp)
+                            .size(100.dp)
                             .clip(CircleShape)
-                            .background(currentPlayBgColor)
-                            // Pasamos el click aquí. Si está editando, se deshabilita tanto el click como el efecto visual (ripple)
+                            .border(
+                                width = ringThickness,
+                                color = currentPlayBgColor,
+                                shape = CircleShape
+                            )
+                            .padding(ringThickness - 1.dp)
+                            .paint(
+                                painter = painterResource(id = R.drawable.fon_glass),
+                                   contentScale = ContentScale.Crop
+                            )
                             .clickable(enabled = !isEditing) { onPlayPause() }
                         ) {
                             Icon(
@@ -954,20 +1064,26 @@ private fun StandardMinimalPlayer(
                                  contentDescription = if (nonNullState.isPlaying) "Pause" else "Play",
                                  tint = currentPlayIconColor,
                                  modifier = Modifier
-                                 .size(44.dp)
-                                 .offset(x = if (!nonNullState.isPlaying) -1.dp else 0.dp)
+                                 .size(54.dp)
+                                 .offset(x = if (!nonNullState.isPlaying) (-1).dp else 0.dp)
                             )
                         }
-                        // button Next
+
+                        // Botón Siguiente
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                            .size(40.dp)
+                            .size(50.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color.White.copy(alpha = 0.18f))
                             .clickable(enabled = !isEditing) { onNext() }
                         ) {
-                            Icon(Icons.Default.SkipNext, "Next", tint = currentIconColor, modifier = Modifier.size(30.dp))
+                            Icon(
+                                imageVector = Icons.Default.SkipNext,
+                                 contentDescription = "Next",
+                                 tint = currentIconColor,
+                                 modifier = Modifier.size(40.dp)
+                            )
                         }
                     }
                 }

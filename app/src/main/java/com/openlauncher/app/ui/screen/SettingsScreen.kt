@@ -27,16 +27,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openlauncher.app.data.AppSettings
 import com.openlauncher.app.data.DayNightMode
+import com.openlauncher.app.data.PipDpi
 import com.openlauncher.app.data.SidebarPosition
 import com.openlauncher.app.data.ShortcutConfig
 import com.openlauncher.app.data.GradientDirection
 import com.openlauncher.app.data.UnitSystem
 import com.openlauncher.app.ui.theme.LocalDayMode
-import com.openlauncher.app.util.SunriseSunset
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import com.openlauncher.app.ui.components.ColorPickerDialog
 import com.openlauncher.app.ui.components.ConfirmDialog
+import com.openlauncher.app.R
+import coil.compose.AsyncImage
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
 
 // Resolved at call site via LocalDayMode — see SettingsDivider / SettingsSection
 
@@ -44,10 +49,14 @@ import com.openlauncher.app.ui.components.ConfirmDialog
 fun SettingsScreen(
     settings: AppSettings,
     accent: Color,
+   // onSelectPipApp = { viewModel.startPipPicker() },
+   // onUpdate = { block -> viewModel.updateSettings(block) },
     onUpdate: (AppSettings.() -> AppSettings) -> Unit,
     onReset: () -> Unit,
     onAssignAutostart: (Int) -> Unit,
     onClearAutostart: (Int) -> Unit,
+    onSelectPipApp: () -> Unit = {},
+    onSelectCarApp: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -69,6 +78,19 @@ fun SettingsScreen(
                 )
             }
             onUpdate { copy(wallpaperUri = it.toString()) }
+        }
+    }
+
+    val vehiclePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            onUpdate { copy(vehicleImage = it.toString()) }
         }
     }
 
@@ -98,145 +120,6 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(4.dp))
 
-        // ── Permissions ──────────────────────────────────────────────────────
-        SettingsSection("Permissions") {
-            val isMediaConnected by com.openlauncher.app.service.MediaListenerService.isConnected.collectAsState()
-
-            // Bumped on ON_RESUME so statuses refresh when the user returns from
-            // system settings (recomposition alone doesn't re-run these checks)
-            var permissionRefresh by remember { mutableIntStateOf(0) }
-            val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
-            DisposableEffect(lifecycleOwner) {
-                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) permissionRefresh++
-                }
-                lifecycleOwner.lifecycle.addObserver(observer)
-                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-            }
-
-            // canDrawOverlays requires API 23 — on Android 5.x the permission
-            // model doesn't exist, so treat it as granted
-            val canDrawOverlays = remember(permissionRefresh) {
-                android.os.Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(context)
-            }
-            val hasLocation = remember(permissionRefresh) {
-                androidx.core.content.ContextCompat.checkSelfPermission(
-                    context, android.Manifest.permission.ACCESS_FINE_LOCATION
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            }
-            val isDefaultLauncher = remember(permissionRefresh) {
-                val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-                context.packageManager.resolveActivity(
-                    home, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
-                )?.activityInfo?.packageName == context.packageName
-            }
-
-            val homeRoleLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.StartActivityForResult()
-            ) { permissionRefresh++ }
-
-            val locationPermissionLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestMultiplePermissions()
-            ) { permissionRefresh++ }
-
-            SettingsButton(
-                label    = "Set as Default Launcher",
-                sublabel = if (isDefaultLauncher) "Active — Open Launcher is the home app"
-                           else "Required so the head unit boots into Open Launcher",
-                icon     = Icons.Default.Home,
-                accent   = if (isDefaultLauncher) accent else Color(0xFF993333),
-                onClick  = {
-                    // Preferred: the system home-role dialog (API 29+). Vendor ROMs
-                    // sometimes ship without it, so fall through to the home-settings
-                    // screen, then the default-apps screen.
-                    var launched = false
-                    if (android.os.Build.VERSION.SDK_INT >= 29) {
-                        val rm = context.getSystemService(android.app.role.RoleManager::class.java)
-                        if (rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME) &&
-                            !rm.isRoleHeld(android.app.role.RoleManager.ROLE_HOME)
-                        ) {
-                            launched = runCatching {
-                                homeRoleLauncher.launch(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_HOME))
-                            }.isSuccess
-                        }
-                    }
-                    if (!launched) {
-                        launched = runCatching {
-                            context.startActivity(
-                                Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }.isSuccess
-                    }
-                    if (!launched) {
-                        runCatching {
-                            context.startActivity(
-                                Intent("android.settings.MANAGE_DEFAULT_APPS_SETTINGS")
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    }
-                }
-            )
-            SettingsDivider()
-            SettingsButton(
-                label    = "Notification Access",
-                sublabel = if (isMediaConnected) "Granted — media controls active" else "Required for Now Playing widget",
-                icon     = if (isMediaConnected) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
-                accent   = if (isMediaConnected) accent else Color(0xFF993333),
-                onClick  = {
-                    context.startActivity(
-                        Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
-                }
-            )
-            SettingsDivider()
-            SettingsButton(
-                label    = "Draw Over Other Apps",
-                sublabel = if (canDrawOverlays) "Granted — PIP overlay enabled" else "Required for PIP floating window",
-                icon     = if (canDrawOverlays) Icons.Default.Layers else Icons.Default.LayersClear,
-                accent   = if (canDrawOverlays) accent else Color(0xFF993333),
-                onClick  = {
-                    if (android.os.Build.VERSION.SDK_INT >= 23) {
-                        runCatching {
-                            context.startActivity(
-                                Intent(
-                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                    Uri.parse("package:${context.packageName}")
-                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    }
-                }
-            )
-            SettingsDivider()
-            SettingsButton(
-                label    = "Location Access",
-                sublabel = if (hasLocation) "Granted — GPS, compass & weather active" else "Required for compass, speed & weather",
-                icon     = if (hasLocation) Icons.Default.LocationOn else Icons.Default.LocationOff,
-                accent   = if (hasLocation) accent else Color(0xFF993333),
-                onClick  = {
-                    if (!hasLocation) {
-                        // Ask in-app first — previously the only grant path was the
-                        // onboarding flow; skipping it left GPS features dead forever
-                        locationPermissionLauncher.launch(arrayOf(
-                            android.Manifest.permission.ACCESS_FINE_LOCATION,
-                            android.Manifest.permission.ACCESS_COARSE_LOCATION
-                        ))
-                    } else {
-                        runCatching {
-                            context.startActivity(
-                                Intent(
-                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                    Uri.parse("package:${context.packageName}")
-                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    }
-                }
-            )
-        }
-
         // ── Vehicle Name ─────────────────────────────────────────────────────
         SettingsSection("Vehicle") {
             var nameInput by remember(settings.vehicleName) { mutableStateOf(settings.vehicleName) }
@@ -262,6 +145,186 @@ fun SettingsScreen(
                     }
                 }
             }
+
+            SettingsDivider()
+
+            // ── PIP App Selector ──────────────────────────────────────────────────
+            SettingsButton(
+                label    = "PIP Widget App",
+                sublabel = if (settings.pipAppPackage.isNotEmpty()) "Current: ${settings.pipAppPackage}" else "Select app to embed in PIP widget",
+                           icon     = Icons.Default.PictureInPicture,
+                           accent   = accent,
+                           onClick  = onSelectPipApp
+            )
+
+            if (settings.pipAppPackage.isNotEmpty()) {
+                TextButton(
+                    onClick  = { onUpdate { copy(pipAppPackage = "") } },
+                           modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("CLEAR PIP APP", color = Color(0xFF993333), fontSize = 9.sp, letterSpacing = 1.sp)
+                }
+            }
+
+            // ── PIP DIP ──────────────────────────────────────────────────
+            SettingsRow(
+                label    = "PIP Density",
+                sublabel = when (settings.pipDpi) {
+                    PipDpi.D160   -> "160 dpi"
+                    PipDpi.D200   -> "200 dpi"
+                    PipDpi.D240   -> "240 dpi"
+                    PipDpi.D280   -> "280 dpi"
+                    PipDpi.D320   -> "320 dpi"
+                },
+                icon     = Icons.Default.SwapHoriz
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    PipDpi.entries.forEach { pos ->
+                        FilterChip(
+                            selected = settings.pipDpi == pos,
+                            onClick  = { onUpdate { copy(pipDpi = pos) } },
+                                   label    = {
+                                       Text(
+                                           when (pos) {
+                                               PipDpi.D160   -> "160 dpi"
+                                               PipDpi.D200   -> "200 dpi"
+                                               PipDpi.D240   -> "240 dpi"
+                                               PipDpi.D280   -> "280 dpi"
+                                               PipDpi.D320   -> "320 dpi"
+                                           },
+                                            fontSize = 9.sp,
+                                            letterSpacing = 0.5.sp
+                                       )
+                                   },
+                                   colors = FilterChipDefaults.filterChipColors(
+                                       selectedContainerColor = accent,
+                                       selectedLabelColor     = Color.Black
+                                   )
+                        )
+                    }
+                }
+            }
+
+            SettingsDivider()
+
+            // ── Speed Widget Vehicle Image ───────────────────────────────────────────
+            val isCustomVehicleImage = settings.vehicleImage.startsWith("content://") || settings.vehicleImage.startsWith("file://")
+            val currentVehicleLabel = when {
+                isCustomVehicleImage -> "Custom Image"
+                settings.vehicleImage == "honda_hrv" -> "Honda HR-V"
+                settings.vehicleImage == "nissan_kicks" -> "Nissan Kicks"
+                else -> "Default SUV"
+            }
+
+            SettingsRow(
+                label    = "Speed Widget Vehicle",
+                sublabel = currentVehicleLabel,
+                icon     = Icons.Default.DirectionsCar
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 64.dp, height = 36.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (isDayMode) Color(0xFFE5E5EA) else Color(0xFF222222)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isCustomVehicleImage) {
+                        AsyncImage(
+                            model = Uri.parse(settings.vehicleImage),
+                            contentDescription = "Vehicle Preview",
+                            modifier = Modifier.fillMaxSize().padding(2.dp),
+                            contentScale = ContentScale.Fit
+                        )
+                    } else {
+                        val resId = when (settings.vehicleImage) {
+                            "honda_hrv" -> R.drawable.honda_hrv
+                            "nissan_kicks" -> R.drawable.nissan_kicks
+                            else -> R.drawable.car_model
+                        }
+                        Image(
+                            painter = painterResource(resId),
+                            contentDescription = "Vehicle Preview",
+                            modifier = Modifier.fillMaxSize().padding(2.dp),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = settings.vehicleImage.isEmpty() || settings.vehicleImage == "car_model",
+                    onClick  = { onUpdate { copy(vehicleImage = "") } },
+                    label    = { Text("Default", fontSize = 9.sp, letterSpacing = 0.5.sp) },
+                    colors   = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = accent,
+                        selectedLabelColor     = Color.Black
+                    )
+                )
+                FilterChip(
+                    selected = settings.vehicleImage == "honda_hrv",
+                    onClick  = { onUpdate { copy(vehicleImage = "honda_hrv") } },
+                    label    = { Text("Honda HR-V", fontSize = 9.sp, letterSpacing = 0.5.sp) },
+                    colors   = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = accent,
+                        selectedLabelColor     = Color.Black
+                    )
+                )
+                FilterChip(
+                    selected = settings.vehicleImage == "nissan_kicks",
+                    onClick  = { onUpdate { copy(vehicleImage = "nissan_kicks") } },
+                    label    = { Text("Nissan Kicks", fontSize = 9.sp, letterSpacing = 0.5.sp) },
+                    colors   = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = accent,
+                        selectedLabelColor     = Color.Black
+                    )
+                )
+                FilterChip(
+                    selected = isCustomVehicleImage,
+                    onClick  = { vehiclePicker.launch(arrayOf("image/*")) },
+                    label    = { Text(if (isCustomVehicleImage) "Custom (Change)" else "Custom...", fontSize = 9.sp, letterSpacing = 0.5.sp) },
+                    colors   = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = accent,
+                        selectedLabelColor     = Color.Black
+                    )
+                )
+            }
+
+            if (isCustomVehicleImage) {
+                TextButton(
+                    onClick  = { onUpdate { copy(vehicleImage = "") } },
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("RESET TO DEFAULT VEHICLE", color = Color(0xFF993333), fontSize = 9.sp, letterSpacing = 1.sp)
+                }
+            }
+
+            SettingsDivider()
+
+            // ── App Selector click in car ──────────────────────────────────────────────────
+            SettingsButton(
+                label    = "Open car App",
+                sublabel = if (settings.carAppPackage.isNotEmpty()) "Current: ${settings.carAppPackage}" else "Select app to open in Speedwidget",
+                icon     = Icons.Default.DirectionsCar,
+                accent   = accent,
+                onClick  = onSelectCarApp
+            )
+
+            if (settings.carAppPackage.isNotEmpty()) {
+                TextButton(
+                    onClick  = { onUpdate { copy(carAppPackage = "") } },
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("CLEAR CAR APP", color = Color(0xFF993333), fontSize = 9.sp, letterSpacing = 1.sp)
+                }
+            }
+
 
             SettingsDivider()
 
@@ -337,6 +400,227 @@ fun SettingsScreen(
                             selectedLabelColor     = Color.Black
                         )
                     )
+                }
+            }
+        }
+
+        // ── Appearance ───────────────────────────────────────────────────────
+        SettingsSection("Appearance") {
+            // Display Mode
+            SettingsRow(
+                label    = "Display Mode",
+                sublabel = when (settings.dayNightMode) {
+                    DayNightMode.DARK   -> "Always dark"
+                    DayNightMode.LIGHT  -> "Always light"
+                    DayNightMode.AUTO   -> "Sunrise / sunset"
+                    DayNightMode.SYSTEM -> "Follows system theme"
+                },
+                icon = when (settings.dayNightMode) {
+                    DayNightMode.DARK   -> Icons.Default.NightlightRound
+                    DayNightMode.LIGHT  -> Icons.Default.LightMode
+                    DayNightMode.AUTO   -> Icons.Default.Brightness4
+                    DayNightMode.SYSTEM -> Icons.Default.PhoneAndroid
+                }
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    DayNightMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = settings.dayNightMode == mode,
+                            onClick  = { onUpdate { copy(dayNightMode = mode) } },
+                                   label    = {
+                                       Text(
+                                           text      = when (mode) {
+                                               DayNightMode.DARK   -> "Dark"
+                                               DayNightMode.LIGHT  -> "Light"
+                                               DayNightMode.AUTO   -> "Sunset"
+                                               DayNightMode.SYSTEM -> "System"
+                                           },
+                                            fontSize  = 9.sp,
+                                            letterSpacing = 0.5.sp
+                                       )
+                                   },
+                                   colors = FilterChipDefaults.filterChipColors(
+                                       selectedContainerColor = accent,
+                                       selectedLabelColor     = Color.Black
+                                   )
+                        )
+                    }
+                }
+            }
+
+            SettingsDivider()
+
+            // Accent color
+            SettingsRow(
+                label    = "Accent Color",
+                sublabel = "UI highlight color",
+                icon     = Icons.Default.Palette
+            ) {
+                Box(
+                    modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(settings.accentColor))
+                    .clickable { showAccentPicker = true }
+                )
+            }
+
+            SettingsDivider()
+
+            // Background color + gradient
+            SettingsRow(
+                label    = "Background",
+                sublabel = if (settings.useGradient) "Gradient" else "Solid color",
+                        icon     = Icons.Default.FormatColorFill
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    // Start color swatch
+                    Box(
+                        modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(settings.backgroundColor))
+                        .clickable { showBgPicker = true }
+                    )
+                    if (settings.useGradient) {
+                        Icon(
+                            Icons.Default.ArrowForward, null,
+                             tint = if (isDayMode) Color(0xFF999999) else Color(0xFF555555), modifier = Modifier.size(14.dp)
+                        )
+                        // End color swatch
+                        Box(
+                            modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(settings.gradientEndColor))
+                            .clickable { showGradientEndPicker = true }
+                        )
+                    }
+                    if (settings.useCustomBackgroundColor) {
+                        TextButton(
+                            onClick = {
+                                onUpdate {
+                                    copy(
+                                        useCustomBackgroundColor = false,
+                                         backgroundColor = Color.Black.toArgb(),
+                                         useGradient = false
+                                    )
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 6.dp),
+                                   modifier = Modifier.height(28.dp)
+                        ) {
+                            Text("DEFAULT", color = accent, fontSize = 9.sp, letterSpacing = 1.sp)
+                        }
+                    }
+                }
+            }
+
+            SettingsDivider()
+
+            // Font Color row
+            SettingsRow(
+                label    = "Font Color",
+                sublabel = "Custom text color in dark mode",
+                icon     = Icons.Default.FormatSize
+            ) {
+                Box(
+                    modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(settings.fontColor))
+                    .clickable { showFontColorPicker = true }
+                )
+            }
+
+            SettingsDivider()
+
+            SettingsRow(label = "Use Gradient", sublabel = "Blend two colors as background", icon = Icons.Default.Gradient) {
+                Switch(checked = settings.useGradient,
+                       onCheckedChange = { onUpdate { copy(useGradient = it) } },
+                       colors = switchColors(accent))
+            }
+
+            SettingsRow(label = "Agregar fondo tipo cd a cover", sublabel = "Fondo decorativo detrás de la carátula de Now Playing", icon = Icons.Default.PhotoLibrary) {
+                Switch(checked = settings.coverBackground,
+                       onCheckedChange = { onUpdate { copy(coverBackground = it) } },
+                       colors = switchColors(accent))
+            }
+
+            if (settings.useGradient) {
+                SettingsDivider()
+                SettingsRow(
+                    label    = "Gradient Direction",
+                    sublabel = when (settings.gradientDirection) {
+                        GradientDirection.TOP_TO_BOTTOM -> "Top to Bottom"
+                        GradientDirection.LEFT_TO_RIGHT -> "Left to Right"
+                        GradientDirection.DIAGONAL      -> "Diagonal (Linear)"
+                        GradientDirection.RADIAL        -> "Radial (Circular)"
+                    },
+                    icon     = Icons.Default.TrendingFlat
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        GradientDirection.entries.forEach { dir ->
+                            FilterChip(
+                                selected = settings.gradientDirection == dir,
+                                onClick  = { onUpdate { copy(gradientDirection = dir) } },
+                                       label    = {
+                                           Text(
+                                               text      = when (dir) {
+                                                   GradientDirection.TOP_TO_BOTTOM -> "Vertical"
+                                                   GradientDirection.LEFT_TO_RIGHT -> "Horizontal"
+                                                   GradientDirection.DIAGONAL      -> "Diagonal"
+                                                   GradientDirection.RADIAL        -> "Radial"
+                                               },
+                                                fontSize  = 9.sp,
+                                                letterSpacing = 0.5.sp
+                                           )
+                                       },
+                                       colors = FilterChipDefaults.filterChipColors(
+                                           selectedContainerColor = accent,
+                                           selectedLabelColor     = Color.Black
+                                       )
+                            )
+                        }
+                    }
+                }
+            }
+
+            SettingsDivider()
+
+            // Wallpaper
+            SettingsButton(
+                label    = "Set Wallpaper",
+                sublabel = if (settings.wallpaperUri.isNotEmpty()) "Custom wallpaper active" else "Choose image from gallery",
+                           icon     = Icons.Default.Wallpaper,
+                           accent   = accent,
+                           onClick  = { wallpaperPicker.launch(arrayOf("image/*")) }
+            )
+            if (settings.wallpaperUri.isNotEmpty()) {
+                Column {
+                    SettingsRow(
+                        label    = "Wallpaper Dim",
+                        sublabel = "${"%.0f".format(settings.wallpaperDim * 100)}%",
+                                icon     = Icons.Default.BrightnessLow
+                    ) {}
+                    Slider(
+                        value         = settings.wallpaperDim,
+                        onValueChange = { onUpdate { copy(wallpaperDim = it) } },
+                           valueRange    = 0f..0.95f,
+                           steps         = 18,
+                           colors        = sliderColors(accent),
+                           modifier      = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    TextButton(
+                        onClick  = { onUpdate { copy(wallpaperUri = "") } },
+                               modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("REMOVE WALLPAPER", color = Color(0xFF993333), fontSize = 9.sp, letterSpacing = 1.sp)
+                    }
                 }
             }
         }
@@ -420,221 +704,6 @@ fun SettingsScreen(
                 accent   = accent,
                 onClick  = { onUpdate { copy(shortcuts = shortcuts + ShortcutConfig()) } }
             )
-        }
-
-        // ── Appearance ───────────────────────────────────────────────────────
-        SettingsSection("Appearance") {
-            // Display Mode
-            SettingsRow(
-                label    = "Display Mode",
-                sublabel = when (settings.dayNightMode) {
-                    DayNightMode.DARK   -> "Always dark"
-                    DayNightMode.LIGHT  -> "Always light"
-                    DayNightMode.AUTO   -> "Sunrise / sunset"
-                    DayNightMode.SYSTEM -> "Follows system theme"
-                },
-                icon = when (settings.dayNightMode) {
-                    DayNightMode.DARK   -> Icons.Default.NightlightRound
-                    DayNightMode.LIGHT  -> Icons.Default.LightMode
-                    DayNightMode.AUTO   -> Icons.Default.Brightness4
-                    DayNightMode.SYSTEM -> Icons.Default.PhoneAndroid
-                }
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    DayNightMode.entries.forEach { mode ->
-                        FilterChip(
-                            selected = settings.dayNightMode == mode,
-                            onClick  = { onUpdate { copy(dayNightMode = mode) } },
-                            label    = {
-                                Text(
-                                    text      = when (mode) {
-                                        DayNightMode.DARK   -> "Dark"
-                                        DayNightMode.LIGHT  -> "Light"
-                                        DayNightMode.AUTO   -> "Sunset"
-                                        DayNightMode.SYSTEM -> "System"
-                                    },
-                                    fontSize  = 9.sp,
-                                    letterSpacing = 0.5.sp
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = accent,
-                                selectedLabelColor     = Color.Black
-                            )
-                        )
-                    }
-                }
-            }
-
-            SettingsDivider()
-
-            // Accent color
-            SettingsRow(
-                label    = "Accent Color",
-                sublabel = "UI highlight color",
-                icon     = Icons.Default.Palette
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(settings.accentColor))
-                        .clickable { showAccentPicker = true }
-                )
-            }
-
-            SettingsDivider()
-
-            // Background color + gradient
-            SettingsRow(
-                label    = "Background",
-                sublabel = if (settings.useGradient) "Gradient" else "Solid color",
-                icon     = Icons.Default.FormatColorFill
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment     = Alignment.CenterVertically
-                ) {
-                    // Start color swatch
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(settings.backgroundColor))
-                            .clickable { showBgPicker = true }
-                    )
-                    if (settings.useGradient) {
-                        Icon(
-                            Icons.Default.ArrowForward, null,
-                            tint = if (isDayMode) Color(0xFF999999) else Color(0xFF555555), modifier = Modifier.size(14.dp)
-                        )
-                        // End color swatch
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(settings.gradientEndColor))
-                                .clickable { showGradientEndPicker = true }
-                        )
-                    }
-                    if (settings.useCustomBackgroundColor) {
-                        TextButton(
-                            onClick = {
-                                onUpdate {
-                                    copy(
-                                        useCustomBackgroundColor = false,
-                                        backgroundColor = Color.Black.toArgb(),
-                                        useGradient = false
-                                    )
-                                }
-                            },
-                            contentPadding = PaddingValues(horizontal = 6.dp),
-                            modifier = Modifier.height(28.dp)
-                        ) {
-                            Text("DEFAULT", color = accent, fontSize = 9.sp, letterSpacing = 1.sp)
-                        }
-                    }
-                }
-            }
-
-            SettingsDivider()
-
-            // Font Color row
-            SettingsRow(
-                label    = "Font Color",
-                sublabel = "Custom text color in dark mode",
-                icon     = Icons.Default.FormatSize
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(settings.fontColor))
-                        .clickable { showFontColorPicker = true }
-                )
-            }
-
-            SettingsDivider()
-
-            SettingsRow(label = "Use Gradient", sublabel = "Blend two colors as background", icon = Icons.Default.Gradient) {
-                Switch(checked = settings.useGradient,
-                    onCheckedChange = { onUpdate { copy(useGradient = it) } },
-                    colors = switchColors(accent))
-            }
-
-            if (settings.useGradient) {
-                SettingsDivider()
-                SettingsRow(
-                    label    = "Gradient Direction",
-                    sublabel = when (settings.gradientDirection) {
-                        GradientDirection.TOP_TO_BOTTOM -> "Top to Bottom"
-                        GradientDirection.LEFT_TO_RIGHT -> "Left to Right"
-                        GradientDirection.DIAGONAL      -> "Diagonal (Linear)"
-                        GradientDirection.RADIAL        -> "Radial (Circular)"
-                    },
-                    icon     = Icons.Default.TrendingFlat
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        GradientDirection.entries.forEach { dir ->
-                            FilterChip(
-                                selected = settings.gradientDirection == dir,
-                                onClick  = { onUpdate { copy(gradientDirection = dir) } },
-                                label    = {
-                                    Text(
-                                        text      = when (dir) {
-                                            GradientDirection.TOP_TO_BOTTOM -> "Vertical"
-                                            GradientDirection.LEFT_TO_RIGHT -> "Horizontal"
-                                            GradientDirection.DIAGONAL      -> "Diagonal"
-                                            GradientDirection.RADIAL        -> "Radial"
-                                        },
-                                        fontSize  = 9.sp,
-                                        letterSpacing = 0.5.sp
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = accent,
-                                    selectedLabelColor     = Color.Black
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            SettingsDivider()
-
-            // Wallpaper
-            SettingsButton(
-                label    = "Set Wallpaper",
-                sublabel = if (settings.wallpaperUri.isNotEmpty()) "Custom wallpaper active" else "Choose image from gallery",
-                icon     = Icons.Default.Wallpaper,
-                accent   = accent,
-                onClick  = { wallpaperPicker.launch(arrayOf("image/*")) }
-            )
-            if (settings.wallpaperUri.isNotEmpty()) {
-                Column {
-                    SettingsRow(
-                        label    = "Wallpaper Dim",
-                        sublabel = "${"%.0f".format(settings.wallpaperDim * 100)}%",
-                        icon     = Icons.Default.BrightnessLow
-                    ) {}
-                    Slider(
-                        value         = settings.wallpaperDim,
-                        onValueChange = { onUpdate { copy(wallpaperDim = it) } },
-                        valueRange    = 0f..0.95f,
-                        steps         = 18,
-                        colors        = sliderColors(accent),
-                        modifier      = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    TextButton(
-                        onClick  = { onUpdate { copy(wallpaperUri = "") } },
-                        modifier = Modifier.align(Alignment.End)
-                    ) {
-                        Text("REMOVE WALLPAPER", color = Color(0xFF993333), fontSize = 9.sp, letterSpacing = 1.sp)
-                    }
-                }
-            }
         }
 
         // ── Typography ───────────────────────────────────────────────────────
@@ -770,8 +839,147 @@ fun SettingsScreen(
             }
         }
 
+        // ── Permissions ──────────────────────────────────────────────────────
+        SettingsSection("Permissions") {
+            val isMediaConnected by com.openlauncher.app.service.MediaListenerService.isConnected.collectAsState()
+
+            // Bumped on ON_RESUME so statuses refresh when the user returns from
+            // system settings (recomposition alone doesn't re-run these checks)
+            var permissionRefresh by remember { mutableIntStateOf(0) }
+            val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+            DisposableEffect(lifecycleOwner) {
+                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) permissionRefresh++
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+            }
+
+            // canDrawOverlays requires API 23 — on Android 5.x the permission
+            // model doesn't exist, so treat it as granted
+            val canDrawOverlays = remember(permissionRefresh) {
+                android.os.Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(context)
+            }
+            val hasLocation = remember(permissionRefresh) {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context, android.Manifest.permission.ACCESS_FINE_LOCATION
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            }
+            val isDefaultLauncher = remember(permissionRefresh) {
+                val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                context.packageManager.resolveActivity(
+                    home, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+                )?.activityInfo?.packageName == context.packageName
+            }
+
+            val homeRoleLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.StartActivityForResult()
+            ) { permissionRefresh++ }
+
+            val locationPermissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestMultiplePermissions()
+            ) { permissionRefresh++ }
+
+            SettingsButton(
+                label    = "Set as Default Launcher",
+                sublabel = if (isDefaultLauncher) "Active — Open Launcher is the home app"
+                else "Required so the head unit boots into Open Launcher",
+                    icon     = Icons.Default.Home,
+                    accent   = if (isDefaultLauncher) accent else Color(0xFF993333),
+                           onClick  = {
+                               // Preferred: the system home-role dialog (API 29+). Vendor ROMs
+                               // sometimes ship without it, so fall through to the home-settings
+                               // screen, then the default-apps screen.
+                               var launched = false
+                               if (android.os.Build.VERSION.SDK_INT >= 29) {
+                                   val rm = context.getSystemService(android.app.role.RoleManager::class.java)
+                                   if (rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME) &&
+                                       !rm.isRoleHeld(android.app.role.RoleManager.ROLE_HOME)
+                                   ) {
+                                       launched = runCatching {
+                                           homeRoleLauncher.launch(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_HOME))
+                                       }.isSuccess
+                                   }
+                               }
+                               if (!launched) {
+                                   launched = runCatching {
+                                       context.startActivity(
+                                           Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                       )
+                                   }.isSuccess
+                               }
+                               if (!launched) {
+                                   runCatching {
+                                       context.startActivity(
+                                           Intent("android.settings.MANAGE_DEFAULT_APPS_SETTINGS")
+                                           .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                       )
+                                   }
+                               }
+                           }
+            )
+            SettingsDivider()
+            SettingsButton(
+                label    = "Notification Access",
+                sublabel = if (isMediaConnected) "Granted — media controls active" else "Required for Now Playing widget",
+                           icon     = if (isMediaConnected) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
+                           accent   = if (isMediaConnected) accent else Color(0xFF993333),
+                           onClick  = {
+                               context.startActivity(
+                                   Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                                   .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                               )
+                           }
+            )
+            SettingsDivider()
+            SettingsButton(
+                label    = "Location Access",
+                sublabel = if (hasLocation) "Granted — GPS, compass & weather active" else "Required for compass, speed & weather",
+                           icon     = if (hasLocation) Icons.Default.LocationOn else Icons.Default.LocationOff,
+                           accent   = if (hasLocation) accent else Color(0xFF993333),
+                           onClick  = {
+                               if (!hasLocation) {
+                                   // Ask in-app first — previously the only grant path was the
+                                   // onboarding flow; skipping it left GPS features dead forever
+                                   locationPermissionLauncher.launch(arrayOf(
+                                       android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                       android.Manifest.permission.ACCESS_COARSE_LOCATION
+                                   ))
+                               } else {
+                                   runCatching {
+                                       context.startActivity(
+                                           Intent(
+                                               Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                               Uri.parse("package:${context.packageName}")
+                                           ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                       )
+                                   }
+                               }
+                           }
+            )
+        }
+
         // ── Maintenance ──────────────────────────────────────────────────────
         SettingsSection("Maintenance") {
+            SettingsButton(
+                label = "View Activity Logs",
+                sublabel = "Debug info for PIP and system events",
+                icon = Icons.Default.Description,
+                accent = accent,
+                onClick = {
+                    val logFile = com.openlauncher.app.util.FileLogger.getLogFilePath(context)
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(Uri.parse("content://com.openlauncher.app.provider/logs"), "text/plain")
+                        // Simplified for now: user can just check /Android/data/com.openlauncher.app/files/launcher_logs.txt
+                        // I'll just show a toast or dialog with the path
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    android.widget.Toast.makeText(context, "Logs at: $logFile", android.widget.Toast.LENGTH_LONG).show()
+                }
+            )
+            
+            SettingsDivider()
+
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick  = { showResetDialog = true },
@@ -789,7 +997,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(32.dp))
 
         Text(
-            text          = "v0.1  ·  Made by David Lam  ·  2026",
+            text          = "v1.5.0  ·  Made by David Lam modded by Cherrypick6641  ·  2026",
             color         = if (isDayMode) Color(0xFFAAAAAA) else Color(0xFF2A2A2A),
             fontSize      = 10.sp,
             letterSpacing = 1.sp,

@@ -43,14 +43,16 @@ import com.openlauncher.app.ui.theme.LocalDayMode
 import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.draw.paint
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import com.openlauncher.app.R
 
-private val ICON_SIZE   = 24.dp
-private val SHORTCUT_ICON_SIZE = 34.dp
-private val SHORTCUT_SLOT_SIZE = 64.dp
-private val NAV_SLOT_SIZE = 48.dp
-private val SIDEBAR_W   = 72.dp
+private val ICON_SIZE   = 64.dp
+private val SHORTCUT_ICON_SIZE = 64.dp
+private val SHORTCUT_SLOT_SIZE = 68.dp
+private val NAV_SLOT_SIZE = 52.dp
+private val SIDEBAR_W   = 68.dp
 
 @Composable
 fun Sidebar(
@@ -75,9 +77,11 @@ fun Sidebar(
     val accent       = Color(settings.accentColor)
     val sidebarBg    = if (isDayMode) Color(0xFFE0E0E0) else Color.Black.copy(alpha = 0.0f)
     val iconInactive = if (isDayMode) Color(0xFF777777) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.3f)
-    val dividerColor = if (isDayMode) Color(0xFFCCCCCC) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
+    val dividerColor = if (isDayMode) Color(0xFFCCCCCC) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.0f)
     val density      = LocalDensity.current
     val slotSizePx   = with(density) { SHORTCUT_SLOT_SIZE.toPx() }
+    val almostWhite  = Color(0xFFF0F0F0)
+    val statusIconColor = if (isDayMode) Color(0xFF444444) else almostWhite
 
     var actionSheetSlot by remember { mutableStateOf<Int?>(null) }
     var iconPickerSlot  by remember { mutableStateOf<Int?>(null) }
@@ -100,31 +104,7 @@ fun Sidebar(
         }
     }
 
-val statusIconColor   = if (isDayMode) Color(0xFF444444) else Color(0xFF666666)
-
-    val timeFormatter = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
-    val dateFormatter = remember { java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()) }
-    val dayFormatter  = remember { java.text.SimpleDateFormat("d", java.util.Locale.getDefault()) }
-
-    var timeText by remember { mutableStateOf(timeFormatter.format(java.util.Date())) }
-    var dateText by remember { mutableStateOf(dateFormatter.format(java.util.Date())) }
-    var dayText  by remember { mutableStateOf(dayFormatter.format(java.util.Date())) }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            val now = java.util.Date()
-            timeText = timeFormatter.format(now)
-            dateText = dateFormatter.format(now)
-            dayText  = dayFormatter.format(now)
-            kotlinx.coroutines.delay(1000)
-        }
-    }
-
     val statusIcons: @Composable () -> Unit = {
-        // CORRECCIÓN: Ahora en horizontal también se apilan verticalmente si lo deseas,
-        // o si prefieres, se quedan en Row pero con padding vertical
-        // Para seguir la lógica vertical, lo ideal es que siempre sea un Row interno
-        // pero que su padding/posicionamiento cambie.
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -139,7 +119,7 @@ val statusIconColor   = if (isDayMode) Color(0xFF444444) else Color(0xFF666666)
                     4 -> Icons.Filled.SignalCellular4Bar
                     else -> Icons.Filled.SignalCellular0Bar
                 }
-                Icon(mobileIcon, null, tint = statusIconColor, modifier = Modifier.size(16.dp))
+                Icon(mobileIcon, null, tint = statusIconColor, modifier = Modifier.size(20.dp))
             }
 
             // Wifi Signal Icon (only if connected)
@@ -151,90 +131,21 @@ val statusIconColor   = if (isDayMode) Color(0xFF444444) else Color(0xFF666666)
                     4 -> Icons.Filled.Wifi
                     else -> Icons.Filled.SignalWifi0Bar
                 }
-                Icon(wifiIcon, null, tint = statusIconColor, modifier = Modifier.size(16.dp))
+                Icon(wifiIcon, null, tint = statusIconColor, modifier = Modifier.size(20.dp))
             }
         }
     }
 
     val clockContent: @Composable () -> Unit = {
-        // CORRECCIÓN: En horizontal ahora se usa el mismo diseño vertical
-        if (isHorizontal) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(vertical = 8.dp) // Añadimos padding vertical para ajustar
-            ) {
-                Text(
-                    text = timeText,
-                     color = if (isDayMode) Color.Black else Color.White,
-                     fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                     fontSize = 16.sp
-                )
-                Text(
-                    text = "${dateText.uppercase()}, $dayText",
-                     color = if (isDayMode) Color(0xFF666666) else Color(0xFF999999),
-                     fontSize = 10.sp,
-                     fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
-                )
-            }
-        } else {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(vertical = 8.dp)
-            ) {
-                Text(
-                    text = timeText,
-                     color = if (isDayMode) Color.Black else Color.White,
-                     fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                     fontSize = 16.sp
-                )
-                Text(
-                    text = dateText.uppercase(),
-                     color = if (isDayMode) Color(0xFF666666) else Color(0xFF999999),
-                     fontSize = 10.sp,
-                     fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
-                )
-                Text(
-                    text = dayText,
-                     color = if (isDayMode) Color(0xFF666666) else Color(0xFF999999),
-                     fontSize = 10.sp
-                )
-            }
-        }
+        ClockContent(isDayMode = isDayMode)
+    }
+
+    val clockContenth: @Composable () -> Unit = {
+        ClockContenth(isDayMode = isDayMode)
     }
 
     val editButtons: @Composable () -> Unit = {
-        // Si es horizontal usamos Row, si es vertical usamos Column
-        if (isHorizontal) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onToggleEditMode, modifier = Modifier.size(NAV_SLOT_SIZE)) {
-                    Icon(Icons.Default.Edit, null, tint = if (editMode) accent else statusIconColor, modifier = Modifier.size(20.dp))
-                }
-                if (editMode) {
-                    IconButton(onClick = onOpenWidgetLibrary, modifier = Modifier.size(NAV_SLOT_SIZE)) {
-                        Icon(Icons.Default.Dashboard, null, tint = statusIconColor, modifier = Modifier.size(20.dp))
-                    }
-                }
-            }
-        } else {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                if (editMode) {
-                    IconButton(onClick = onOpenWidgetLibrary, modifier = Modifier.size(NAV_SLOT_SIZE)) {
-                        Icon(Icons.Default.Dashboard, null, tint = statusIconColor, modifier = Modifier.size(20.dp))
-                    }
-                }
-                IconButton(onClick = onToggleEditMode, modifier = Modifier.size(NAV_SLOT_SIZE)) {
-                    Icon(Icons.Default.Edit, null, tint = if (editMode) accent else statusIconColor, modifier = Modifier.size(20.dp))
-                }
-            }
-        }
-    }
-
-  /*  val editButtons: @Composable () -> Unit = {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        val content = @Composable {
             if (editMode) {
                 IconButton(onClick = onOpenWidgetLibrary, modifier = Modifier.size(NAV_SLOT_SIZE)) {
                     Icon(Icons.Default.Dashboard, null, tint = statusIconColor, modifier = Modifier.size(20.dp))
@@ -244,122 +155,177 @@ val statusIconColor   = if (isDayMode) Color(0xFF444444) else Color(0xFF666666)
                 Icon(Icons.Default.Edit, null, tint = if (editMode) accent else statusIconColor, modifier = Modifier.size(20.dp))
             }
         }
-    } */
+
+        if (isHorizontal) {
+            Row(verticalAlignment = Alignment.CenterVertically) { content() }
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) { content() }
+        }
+    }
 
     val shortcutsContent: @Composable () -> Unit = {
         settings.shortcuts.forEachIndexed { index, shortcut ->
             val isDragging  = (index == draggingIndex)
             val translation = if (isDragging) dragOffsetPx else slotTranslation(index)
 
-            ShortcutSlot(
-                shortcut        = shortcut,
-                accent          = accent,
-                resolvedIcon    = if (shortcut.packageName.isNotEmpty())
-                                      installedIconFor(shortcut.packageName) else null,
-                isDragging      = isDragging,
-                dragTranslation = translation,
-                isHorizontal    = isHorizontal,
-                size            = SHORTCUT_SLOT_SIZE,
-                onClick         = { onShortcutClick(index) },
-                onLongPress     = {
-                    if (shortcut.packageName.isNotEmpty()) {
-                        actionSheetSlot = index
-                    } else {
-                        onShortcutLongPress(index)
-                    }
-                },
-                onDragStart = {
-                    draggingIndex = index
-                    dragOffsetPx  = 0f
-                },
-                onDragDelta = { d -> dragOffsetPx += d },
-                onDragEnd   = {
-                    val from = draggingIndex
-                    val to   = dragTargetIndex()
-                    if (from >= 0 && to != from) onReorder(from, to)
-                    draggingIndex = -1
-                    dragOffsetPx  = 0f
-                }
-            )
+            // Envolvemos el slot para darle separación externa
+            Box(
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp) // <- Espacio entre iconos
+            ) {
+                ShortcutSlot(
+                    shortcut        = shortcut,
+                    accent          = accent,
+                    resolvedIcon    = if (shortcut.packageName.isNotEmpty())
+                    installedIconFor(shortcut.packageName) else null,
+                             isDragging      = isDragging,
+                             dragTranslation = translation,
+                             isHorizontal    = isHorizontal,
+                             size            = SHORTCUT_SLOT_SIZE,
+                             onClick         = { onShortcutClick(index) },
+                             onLongPress     = {
+                                 if (shortcut.packageName.isNotEmpty()) {
+                                     actionSheetSlot = index
+                                 } else {
+                                     onShortcutLongPress(index)
+                                 }
+                             },
+                             onDragStart = {
+                                 draggingIndex = index
+                                 dragOffsetPx  = 0f
+                             },
+                             onDragDelta = { d -> dragOffsetPx += d },
+                             onDragEnd   = {
+                                 val from = draggingIndex
+                                 val to   = dragTargetIndex()
+                                 if (from >= 0 && to != from) onReorder(from, to)
+                                     draggingIndex = -1
+                                     dragOffsetPx  = 0f
+                             }
+                )
+            }
         }
     }
 
     val navButtons: @Composable () -> Unit = {
-        NavButton(
-            icon         = Icons.Default.Apps,
-            label        = "Apps",
-            isActive     = currentDest == NavDestination.APP_LIBRARY,
+      /*  NavButton(
+            icon         = Icons.Default.DirectionsCar,
+            label        = "Car Home",
+            isActive     = currentDest == NavDestination.HOMECAR,
             accent       = accent,
-            iconInactive = iconInactive,
+            iconInactive = if (isDayMode) iconInactive else almostWhite,
             isHorizontal = isHorizontal,
-            onClick      = { onNavigate(NavDestination.APP_LIBRARY) }
-        )
+            onClick      = {
+                if (currentDest == NavDestination.HOMECAR) onNavigate(NavDestination.HOME)
+                          else onNavigate(NavDestination.HOMECAR)
+            }
+        ) */
         NavButton(
             icon         = Icons.Default.Settings,
             label        = "Settings",
             isActive     = currentDest == NavDestination.SETTINGS,
             accent       = accent,
-            iconInactive = iconInactive,
+            iconInactive = if (isDayMode) iconInactive else almostWhite,
             isHorizontal = isHorizontal,
-            onClick      = { onNavigate(NavDestination.SETTINGS) }
+            onClick      = { 
+                if (currentDest == NavDestination.SETTINGS) onNavigate(NavDestination.HOME) 
+                else onNavigate(NavDestination.SETTINGS) 
+            }
         )
         NavButton(
-            icon         = Icons.Default.Home,
-            label        = "Home",
-            isActive     = currentDest == NavDestination.HOME,
+            icon         = Icons.Default.Apps,
+            label        = "Apps",
+            isActive     = currentDest == NavDestination.APP_LIBRARY,
             accent       = accent,
-            iconInactive = iconInactive,
+            iconInactive = if (isDayMode) iconInactive else almostWhite,
+            customBg     = accent,
             isHorizontal = isHorizontal,
-            onClick      = { onNavigate(NavDestination.HOME) }
+            onClick      = { 
+                if (currentDest == NavDestination.APP_LIBRARY) onNavigate(NavDestination.HOME) 
+                else onNavigate(NavDestination.APP_LIBRARY) 
+            }
         )
     }
 
     if (isHorizontal) {
         Box(
             modifier = modifier
-            .fillMaxWidth()
-            .height(SIDEBAR_W - 6.dp)
-           // .clip(RoundedCornerShape(20.dp))
-            .background(sidebarBg)
+                .fillMaxWidth()
+                .height(SIDEBAR_W)
+                .background(sidebarBg)
+              /*  .paint(
+                    painter = if (isDayMode) painterResource(id = R.drawable.sidebar_white) else painterResource(id = R.drawable.sidebar),
+                       contentScale = ContentScale.Crop // Ajusta la imagen para que llene el Box
+                ) */
         ) {
-            // 1. Accesos directos / Shortcuts (Centro)
             Row(
-                modifier = Modifier
-                .align(Alignment.Center)
-                .fillMaxHeight()
-                .padding(horizontal = 10.dp)
-                .horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                shortcutsContent()
-            }
-
-            // 2. Botones de Navegación (Izquierda)
-            Row(
-                modifier = Modifier
-                .align(Alignment.CenterStart)
-                .fillMaxHeight(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                NavButton(Icons.Default.Home,     "Home",     currentDest == NavDestination.HOME,        accent, iconInactive, true) { onNavigate(NavDestination.HOME) }
-                NavButton(Icons.Default.Settings, "Settings", currentDest == NavDestination.SETTINGS,    accent, iconInactive, true) { onNavigate(NavDestination.SETTINGS) }
-                NavButton(Icons.Default.Apps,     "Apps",     currentDest == NavDestination.APP_LIBRARY, accent, iconInactive, true) { onNavigate(NavDestination.APP_LIBRARY) }
-                editButtons()
-            }
-
-            // 3. Estado + Reloj juntos (Derecha) - Compacto
-            Row(
-                modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .padding(end = 16.dp), // Padding general más corto
+                modifier = Modifier.fillMaxSize(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp) // Espacio elegante y compacto
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // CORRECCIÓN: Invertimos el orden para que los iconos de estado queden a la derecha
-                // y el reloj compacto a la izquierda.
-                statusIcons()
-                clockContent()
+                // Controls pinned to the LEFT
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 2.dp)) {
+                    NavButton(
+                        icon         = Icons.Default.Apps,
+                        label        = "Apps",
+                        isActive     = currentDest == NavDestination.APP_LIBRARY,
+                        accent       = accent,
+                        iconInactive = if (isDayMode) iconInactive else almostWhite,
+                              customBg     = accent,
+                              isHorizontal = true,
+                              onClick      = {
+                                  if (currentDest == NavDestination.APP_LIBRARY) onNavigate(NavDestination.HOME)
+                                      else onNavigate(NavDestination.APP_LIBRARY)
+                              }
+                    )
+                    NavButton(
+                        icon         = Icons.Default.Settings,
+                        label        = "Settings",
+                        isActive     = currentDest == NavDestination.SETTINGS,
+                        accent       = accent,
+                        iconInactive = if (isDayMode) iconInactive else almostWhite,
+                        isHorizontal = true,
+                        onClick      = { 
+                            if (currentDest == NavDestination.SETTINGS) onNavigate(NavDestination.HOME) 
+                            else onNavigate(NavDestination.SETTINGS) 
+                        }
+                    )
+
+                  /*  NavButton(
+                        icon         = Icons.Default.DirectionsCar,
+                        label        = "Car Home",
+                        isActive     = currentDest == NavDestination.HOMECAR,
+                        accent       = accent,
+                        iconInactive = if (isDayMode) iconInactive else almostWhite,
+                              isHorizontal = true,
+                              onClick      = {
+                                  if (currentDest == NavDestination.HOMECAR) onNavigate(NavDestination.HOME)
+                                      else onNavigate(NavDestination.HOMECAR)
+                              }
+                    ) */
+                    editButtons()
+                }
+
+                // Shortcuts centered in the middle
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 16.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    shortcutsContent()
+                }
+
+                // Clock and status icons pinned to the RIGHT
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(end = 12.dp)
+                ) {
+                    statusIcons()
+                    Spacer(Modifier.width(16.dp))
+                    clockContenth()
+                }
             }
         }
     } else {
@@ -675,12 +641,18 @@ private fun NavButton(
     isActive: Boolean,
     accent: Color,
     iconInactive: Color,
+    customBg: Color? = null,
     isHorizontal: Boolean = false,
     onClick: () -> Unit
 ) {
     val isDayMode = LocalDayMode.current
     val activeIconColor = if (isDayMode) Color(0xFF111111) else Color.White
     val activeBg = if (isDayMode) Color(0xFF000000).copy(alpha = 0.08f) else Color.White.copy(alpha = 0.06f)
+    val finalBg = when {
+        isActive -> activeBg
+        customBg != null -> customBg
+        else -> Color.Transparent
+    }
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -688,9 +660,9 @@ private fun NavButton(
                 if (isHorizontal) Modifier.fillMaxHeight().width(NAV_SLOT_SIZE)
                 else              Modifier.fillMaxWidth().height(NAV_SLOT_SIZE)
             )
-            .padding(4.dp)
+            .padding(2.dp)
             .clip(MaterialTheme.shapes.medium)
-            .background(if (isActive) activeBg else Color.Transparent)
+            .background(finalBg)
             .clickable(onClick = onClick)
     ) {
         Icon(
@@ -698,6 +670,89 @@ private fun NavButton(
             contentDescription = label,
             tint               = if (isActive) activeIconColor else iconInactive,
             modifier           = Modifier.size(ICON_SIZE)
+        )
+    }
+}
+
+@Composable
+private fun ClockContent(isDayMode: Boolean) {
+    val timeFormatter = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+    val dateFormatter = remember { java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()) }
+    val dayFormatter  = remember { java.text.SimpleDateFormat("dd/MM", java.util.Locale.getDefault()) }
+
+    var timeText by remember { mutableStateOf(timeFormatter.format(java.util.Date())) }
+    var dateText by remember { mutableStateOf(dateFormatter.format(java.util.Date())) }
+    var dayText  by remember { mutableStateOf(dayFormatter.format(java.util.Date())) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = java.util.Date()
+            timeText = timeFormatter.format(now)
+            dateText = dateFormatter.format(now)
+            dayText  = dayFormatter.format(now)
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(vertical = 8.dp)
+    ) {
+        Text(
+            text = timeText,
+             color = if (isDayMode) Color.Black else Color.White,
+             fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+             fontSize = 16.sp
+        )
+        Text(
+            text = dateText.uppercase(),
+             color = if (isDayMode) Color(0xFF666666) else Color(0xFFF0F0F0),
+             fontSize = 10.sp,
+             fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+        )
+        Text(
+            text = dayText,
+             color = if (isDayMode) Color(0xFF666666) else Color(0xFFF0F0F0),
+             fontSize = 10.sp
+        )
+    }
+}
+
+@Composable
+private fun ClockContenth(isDayMode: Boolean) {
+    val timeFormatter = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+    val dateFormatter = remember { java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()) }
+    val dayFormatter  = remember { java.text.SimpleDateFormat("dd/MM", java.util.Locale.getDefault()) }
+
+    var timeText by remember { mutableStateOf(timeFormatter.format(java.util.Date())) }
+    var dateText by remember { mutableStateOf(dateFormatter.format(java.util.Date())) }
+    var dayText  by remember { mutableStateOf(dayFormatter.format(java.util.Date())) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = java.util.Date()
+            timeText = timeFormatter.format(now)
+            dateText = dateFormatter.format(now)
+            dayText  = dayFormatter.format(now)
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(vertical = 8.dp)
+    ) {
+        Text(
+            text = timeText,
+             color = if (isDayMode) Color.Black else Color.White,
+             fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+             fontSize = 16.sp
+        )
+        Text(
+            text = "${dateText.uppercase()}, $dayText",
+             color = if (isDayMode) Color(0xFF666666) else Color(0xFF999999),
+             fontSize = 10.sp,
+             fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
         )
     }
 }
@@ -742,6 +797,8 @@ fun DefaultShortcutIcon.toPainter(): Painter = when (this) {
     DefaultShortcutIcon.CUSTOM_PHONE   -> painterResource(id = R.drawable.phone)
     DefaultShortcutIcon.CUSTOM_VIDEO   -> painterResource(id = R.drawable.video)
     DefaultShortcutIcon.CUSTOM_MAPS   -> painterResource(id = R.drawable.maps)
+    DefaultShortcutIcon.CUSTOM_CONFIG   -> painterResource(id = R.drawable.config)
+    DefaultShortcutIcon.CUSTOM_FILES   -> painterResource(id = R.drawable.files)
     // ── NUEVOS ICONOS PNG ──────────────────────────────────────────────────
     DefaultShortcutIcon.CUSTOM_MUSIC_ORI   -> painterResource(id = R.drawable.music_ori)
     DefaultShortcutIcon.CUSTOM_RADIO_ORI   -> painterResource(id = R.drawable.radio_ori)
@@ -749,4 +806,6 @@ fun DefaultShortcutIcon.toPainter(): Painter = when (this) {
     DefaultShortcutIcon.CUSTOM_PHONE_ORI   -> painterResource(id = R.drawable.phone_ori)
     DefaultShortcutIcon.CUSTOM_VIDEO_ORI   -> painterResource(id = R.drawable.video_ori)
     DefaultShortcutIcon.CUSTOM_MAPS_ORI   -> painterResource(id = R.drawable.maps_ori)
+    DefaultShortcutIcon.CUSTOM_CONFIG_ORI   -> painterResource(id = R.drawable.config_ori)
+    DefaultShortcutIcon.CUSTOM_FILES_ORI   -> painterResource(id = R.drawable.files_ori)
 }

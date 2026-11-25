@@ -18,6 +18,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openlauncher.app.util.LocationData
 import kotlin.math.abs
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.Brush
+import kotlin.math.cos
+import kotlin.math.sin
+import androidx.compose.ui.draw.paint
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+// El error de "drawable" se solucionará automáticamente al importar tu clase R correcta:
+import com.openlauncher.app.R
 
 @Composable
 fun TelemetryWidget(
@@ -27,24 +37,31 @@ fun TelemetryWidget(
     isDayMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val contentColor = if (isDayMode) Color(0xFF111111) else MaterialTheme.colorScheme.onBackground
-    val subColor     = if (isDayMode) Color(0xFF888888) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
-    val ringColor    = if (isDayMode) Color(0xFFCCCCCC) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f)
-    val cardinalMain = if (isDayMode) Color(0xFF555555) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-    val cardinalSub  = if (isDayMode) Color(0xFF888888) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f)
-    val arrowColor   = if (isDayMode) Color(0xFF222222) else MaterialTheme.colorScheme.onBackground
+    // ── CONFIGURACIÓN DE PALETA ADAPTATIVA ─────────────────────────────────
+    val contentColor = if (isDayMode) Color(0xFF222222) else MaterialTheme.colorScheme.onBackground
+    val subColor     = if (isDayMode) Color(0xFF777777) else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
 
-    // CAMBIO 1: Usamos Box como raíz para permitir superposición y centro absoluto
+    // Color de las marcas graduadas grandes y pequeñas
+   // val tickColorMain = if (isDayMode) Color(0xFF111111) else Color(0xFFE0E0E0)
+    val tickColorMain = if (isDayMode) Color(0xFF555555) else Color(0xFF111111)
+    val tickColorSub  = if (isDayMode) Color(0xFF555555) else Color(0xFF666666)
+
+    // Color del texto de los puntos cardinales y grados en formato Android nativo
+    val nativeTextColor = if (isDayMode) android.graphics.Color.parseColor("#222222") else android.graphics.Color.WHITE
+
     Box(
-        modifier = modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+        modifier = modifier
+        .paint(
+            painter = if (isDayMode) painterResource(id = R.drawable.mapa_viejo_white) else painterResource(id = R.drawable.mapa_viejo),
+               contentScale = ContentScale.Crop // Ajusta la imagen para que llene el Box
+        )
+        .padding(horizontal = 14.dp, vertical = 12.dp)
     ) {
-        // ── Compass ring — Centrado absolutamente ─────────────────────────────
+        // ── COMPASS RING (Centro absoluto) ───────────────────────────────────
         BoxWithConstraints(
-            modifier         = Modifier.fillMaxSize(), // Ahora llena todo el contenedor
+            modifier         = Modifier.fillMaxSize(),
                            contentAlignment = Alignment.Center
         ) {
-            // Reducimos un poco el multiplicador (ej. de 0.65f a 0.55f) para que el anillo
-            // no pise el texto de las coordenadas en pantallas pequeñas.
             val minDim = minOf(maxWidth, maxHeight)
             val radius = minDim * 0.55f
 
@@ -61,78 +78,257 @@ fun TelemetryWidget(
                     .graphicsLayer { rotationZ = -bearing },
                     contentAlignment = Alignment.Center
                 ) {
-                    // 1. Dibujamos el anillo
                     Canvas(modifier = Modifier.fillMaxSize()) {
-                        val cx = size.width  / 2f
+
+                        val cx = size.width / 2f
                         val cy = size.height / 2f
+
+                        val outerRadius = radiusPx
+                        val ringWidth = 6.dp.toPx()
+                        val innerRadius = outerRadius - ringWidth
+
+                        val ringColors = if (isDayMode) {
+                            listOf(Color(0xFFCECECE), Color(0xFF8E8E8E)) // Tonos claros (Modo Día)
+                        } else {
+                            listOf(Color(0xFFCECECE), Color(0xFF8E8E8E)) // Tonos oscuros metálicos
+                        }
+
+                        // Aro exterior principal
                         drawCircle(
-                            color  = ringColor,
-                            radius = radiusPx,
+                            brush = Brush.linearGradient(
+                                colors = ringColors,
+                                start = Offset(cx - outerRadius, cy - outerRadius), end = Offset(cx + outerRadius, cy + outerRadius)
+                            ),
+                            radius = outerRadius,
                             center = Offset(cx, cy),
-                                   style  = Stroke(width = 1.5.dp.toPx())
+                                   style = Stroke(ringWidth)
+                        )
+
+                        // Borde exterior fino
+                        drawCircle(
+                            color = tickColorSub,
+                                   radius = outerRadius + ringWidth / 2f,
+                                   center = Offset(cx, cy),
+                                   style = Stroke(1.dp.toPx())
+                        )
+
+                        // Borde interior fino
+                        drawCircle(
+                            color = tickColorSub,
+                                   radius = innerRadius,
+                                   center = Offset(cx, cy),
+                                   style = Stroke(1.dp.toPx())
+                        )
+
+                        // Marcas grandes (cada 30 grados)
+                        for (deg in 0 until 360 step 30) {
+                            val rad = Math.toRadians((deg - 90).toDouble())
+                            val outer = outerRadius + ringWidth / 2f
+                            val inner = innerRadius + 1.dp.toPx()
+
+                            drawLine(
+                                color = tickColorMain,
+                                start = Offset(
+                                    cx + cos(rad).toFloat() * inner,
+                                               cy + sin(rad).toFloat() * inner
+                                ),
+                                end = Offset(
+                                    cx + cos(rad).toFloat() * outer,
+                                             cy + sin(rad).toFloat() * outer
+                                ),
+                                strokeWidth = 1.5.dp.toPx()
+                            )
+                        }
+
+                        // Marcas pequeñas (cada 5 grados)
+                        for (deg in 0 until 360 step 5) {
+                            if (deg % 30 == 0) continue
+
+                                val rad = Math.toRadians((deg - 90).toDouble())
+                                val startRadius = innerRadius - 1.dp.toPx()
+                                val endRadius = innerRadius - 4.dp.toPx()
+
+                                drawLine(
+                                    color = tickColorSub,
+                                    start = Offset(
+                                        cx + cos(rad).toFloat() * startRadius,
+                                                   cy + sin(rad).toFloat() * startRadius
+                                    ),
+                                    end = Offset(
+                                        cx + cos(rad).toFloat() * endRadius,
+                                                 cy + sin(rad).toFloat() * endRadius
+                                    ),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                        }
+
+                        // Pintura nativa para textos internos
+                        val paint = android.graphics.Paint().apply {
+                            isAntiAlias = true
+                            color = nativeTextColor
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        }
+
+                        val textRadius = innerRadius + ringWidth * 0.45f
+
+                        for (deg in 0 until 360 step 30) {
+                            val rad = Math.toRadians((deg - 90).toDouble())
+                            val tx = cx + cos(rad).toFloat() * textRadius
+                            val ty = cy + sin(rad).toFloat() * textRadius
+
+                            drawContext.canvas.nativeCanvas.save()
+                            drawContext.canvas.nativeCanvas.rotate(deg.toFloat(), tx, ty)
+
+                            when (deg) {
+                                0 -> {
+                                    paint.textSize = 14.dp.toPx()
+                                    drawContext.canvas.nativeCanvas.drawText("N", tx, ty + paint.textSize * 1.60f, paint)
+                                }
+                                90 -> {
+                                    paint.textSize = 14.dp.toPx()
+                                    drawContext.canvas.nativeCanvas.drawText("E", tx, ty + paint.textSize * 1.60f, paint)
+                                }
+                                180 -> {
+                                    paint.textSize = 14.dp.toPx()
+                                    drawContext.canvas.nativeCanvas.drawText("S", tx, ty + paint.textSize * 1.60f, paint)
+                                }
+                                270 -> {
+                                    paint.textSize = 14.dp.toPx()
+                                    drawContext.canvas.nativeCanvas.drawText("W", tx, ty + paint.textSize * 1.60f, paint)
+                                }
+                                else -> {
+                                    paint.textSize = 6.dp.toPx()
+                                    drawContext.canvas.nativeCanvas.drawText(deg.toString(), tx, ty + paint.textSize * 1.10f, paint)
+                                }
+                            }
+                            drawContext.canvas.nativeCanvas.restore()
+                        }
+
+                        // Corona interior fina decorativa
+                        drawCircle(
+                            color = tickColorSub,
+                                   radius = innerRadius - 5.dp.toPx(),
+                                   center = Offset(cx, cy),
+                                   style = Stroke(1.dp.toPx())
                         )
                     }
-
-                    // 2. Posicionamiento Cardinal
-                    val labelOffset = radius - 12.dp
-
-                    Text(
-                        text     = "N",
-                         color    = cardinalMain,
-                         fontSize = 11.sp,
-                         modifier = Modifier.offset(y = -labelOffset)
-                    )
-                    Text(
-                        text     = "S",
-                         color    = cardinalMain,
-                         fontSize = 11.sp,
-                         modifier = Modifier.offset(y = labelOffset)
-                    )
-                    Text(
-                        text     = "E",
-                         color    = cardinalSub,
-                         fontSize = 9.sp,
-                         modifier = Modifier.offset(x = labelOffset)
-                    )
-                    Text(
-                        text     = "W",
-                         color    = cardinalSub,
-                         fontSize = 9.sp,
-                         modifier = Modifier.offset(x = -labelOffset)
-                    )
                 }
             }
 
-            // Fixed layer: Flecha estática
+            // AGUJA CENTRAL 3D
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val cx = size.width  / 2f
+                val cx = size.width / 2f
                 val cy = size.height / 2f
 
-                val arrowH = radiusPx * 0.22f
-                val arrowW = arrowH * 0.48f
+                val needleLength = radiusPx * 0.58f
+                val needleWidth = needleLength * 0.11f
 
+                // ─── AGUJA NORTE (ROJO 3D) ───────────────────────────────────────────
+                // Norte Lado Izquierdo (Luz)
                 drawPath(
-                    path  = Path().apply {
-                        moveTo(cx, cy - arrowH)
-                        lineTo(cx + arrowW, cy + arrowH * 0.42f)
-                        lineTo(cx, cy + arrowH * 0.08f)
-                        lineTo(cx - arrowW, cy + arrowH * 0.42f)
+                    path = Path().apply {
+                        moveTo(cx, cy - needleLength)
+                        lineTo(cx, cy)
+                        lineTo(cx - needleWidth, cy)
                         close()
                     },
-                    color = arrowColor
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color(0xFFFF5252), Color(0xFFFF1744)),
+                                                 start = Offset(cx - needleWidth, cy - needleLength),
+                                                 end = Offset(cx, cy)
+                    )
                 )
 
+                // Norte Lado Derecho (Sombra)
+                drawPath(
+                    path = Path().apply {
+                        moveTo(cx, cy - needleLength)
+                        lineTo(cx + needleWidth, cy)
+                        lineTo(cx, cy)
+                        close()
+                    },
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color(0xFFD50000), Color(0xFF9B0000)),
+                                                 start = Offset(cx, cy - needleLength),
+                                                 end = Offset(cx + needleWidth, cy)
+                    )
+                )
+
+                // ─── AGUJA SUR (Ajustada para que resalte en fondos claros) ───────
+                val surLightColors = if (isDayMode) {
+                    listOf(Color(0xFFBFBFBF), Color(0xFFB0BEC5)) // Plata claro bien definido
+                } else {
+                    listOf(Color(0xFFFFFFFF), Color(0xFFDCDCDC))
+                }
+
+                val surDarkColors = if (isDayMode) {
+                    listOf(Color(0xFF90A4AE), Color(0xFF546E7A)) // Gris sombra oscuro para contraste radical
+                } else {
+                    listOf(Color(0xFFB8B8B8), Color(0xFF757575))
+                }
+
+                // Sur Lado Izquierdo (Luz)
+                drawPath(
+                    path = Path().apply {
+                        moveTo(cx, cy + needleLength)
+                        lineTo(cx - needleWidth, cy)
+                        lineTo(cx, cy)
+                        close()
+                    },
+                    brush = Brush.linearGradient(
+                        colors = surLightColors,
+                        start = Offset(cx - needleWidth, cy),
+                                                 end = Offset(cx, cy + needleLength)
+                    )
+                )
+
+                // Sur Lado Derecho (Sombra)
+                drawPath(
+                    path = Path().apply {
+                        moveTo(cx, cy + needleLength)
+                        lineTo(cx, cy)
+                        lineTo(cx + needleWidth, cy)
+                        close()
+                    },
+                    brush = Brush.linearGradient(
+                        colors = surDarkColors,
+                        start = Offset(cx, cy),
+                                                 end = Offset(cx + needleWidth, cy + needleLength)
+                    )
+                )
+
+                // ─── BOTÓN CENTRAL DEL EJE ───────────────────
+                val centerButtonRadius = 7.dp.toPx()
+                val centerPinRadius = 5.dp.toPx()
+
+                // Sombra/Borde exterior: En modo día lo hacemos bien oscuro (0xFF424242) para recortar la figura del fondo
                 drawCircle(
-                    color  = Color(0xFF777777),
-                           radius = 10.dp.toPx(),
+                    color = if (isDayMode) Color(0xFF424242) else Color(0xFF212121),
+                           radius = centerButtonRadius,
                            center = Offset(cx, cy),
-                           style  = Stroke(width = 1.5.dp.toPx())
+                           style = Stroke(1.2.dp.toPx()) // Un grosor ligeramente mayor para definición limpia
+                )
+
+                // Esfera del eje con degradado radial corregido para modo día
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = if (isDayMode) {
+                            // Mantenemos el punto blanco central de brillo, pero oscurecemos los extremos
+                            listOf(Color(0xFFFFFFFF), Color(0xFFBDBDBD), Color(0xFF757575))
+                        } else {
+                            listOf(Color(0xFFFFFFFF), Color(0xFFCFCFCF), Color(0xFF616161))
+                        },
+                        center = Offset(cx - 1.5.dp.toPx(), cy - 1.5.dp.toPx()),
+                                                 radius = centerPinRadius
+                    ),
+                    radius = centerPinRadius,
+                    center = Offset(cx, cy)
                 )
             }
         }
 
-        // ── Lat / Lon at the bottom ──────────────────────────────────────────
-        // CAMBIO 2: Alineamos esta fila abajo del Box usando Modifier.align
+        // ── LATITUD / LONGITUD (Bloque inferior) ──────────────────────────────
         Row(
             modifier = Modifier
             .fillMaxWidth()

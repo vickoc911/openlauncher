@@ -42,11 +42,13 @@ class SettingsRepository(private val context: Context) {
         val GRADIENT_END_COLOR    = intPreferencesKey("gradient_end_color")
         val WALLPAPER_DIM         = floatPreferencesKey("wallpaper_dim")
         val RIGHT_HAND_DRIVE      = booleanPreferencesKey("right_hand_drive") // kept for migration
+        val PIP_DPI               = stringPreferencesKey("pip_dpi")
         val SIDEBAR_POSITION           = stringPreferencesKey("sidebar_position")
         val BOTTOM_BAR_SHORTCUTS_RIGHT = booleanPreferencesKey("bottom_bar_shortcuts_right")
         val DAY_NIGHT_MODE        = stringPreferencesKey("day_night_mode")
         val SHOW_PIP              = booleanPreferencesKey("show_pip")
         val PIP_APP_PACKAGE       = stringPreferencesKey("pip_app_package")
+        val CAR_APP_PACKAGE       = stringPreferencesKey("car_app_package")
         val RADIO_PACKAGE         = stringPreferencesKey("radio_package")
         val ONBOARDING_COMPLETED  = booleanPreferencesKey("onboarding_completed")
         val SHOW_VITALS           = booleanPreferencesKey("show_vitals")
@@ -64,6 +66,8 @@ class SettingsRepository(private val context: Context) {
         val SHOW_TRAFFIC  = booleanPreferencesKey("show_traffic")
         val AUTOSTART_PACKAGES_JSON = stringPreferencesKey("autostart_packages_json")
         val AUTOSTART_DELAY = intPreferencesKey("autostart_delay")
+        val VEHICLE_IMAGE   = stringPreferencesKey("vehicle_image")
+        val COVER_BACKGROUND = booleanPreferencesKey("cover_background")
     }
 
     val settingsFlow: Flow<AppSettings> = context.dataStore.data
@@ -118,12 +122,14 @@ class SettingsRepository(private val context: Context) {
                 useGradient      = prefs[Keys.USE_GRADIENT]        ?: defaults.useGradient,
                 gradientEndColor = prefs[Keys.GRADIENT_END_COLOR]  ?: defaults.gradientEndColor,
                 wallpaperDim     = prefs[Keys.WALLPAPER_DIM]       ?: defaults.wallpaperDim,
+                pipDpi           = prefs[Keys.PIP_DPI]?.let { runCatching { PipDpi.valueOf(it) }.getOrNull() } ?: defaults.pipDpi,
                 sidebarPosition  = prefs[Keys.SIDEBAR_POSITION]?.let { runCatching { SidebarPosition.valueOf(it) }.getOrNull() }
                                    ?: if (prefs[Keys.RIGHT_HAND_DRIVE] == true) SidebarPosition.RIGHT else defaults.sidebarPosition,
                 bottomBarShortcutsRight = prefs[Keys.BOTTOM_BAR_SHORTCUTS_RIGHT] ?: defaults.bottomBarShortcutsRight,
                 dayNightMode     = prefs[Keys.DAY_NIGHT_MODE]?.let { runCatching { DayNightMode.valueOf(it) }.getOrNull() } ?: defaults.dayNightMode,
                 showPip          = prefs[Keys.SHOW_PIP]         ?: defaults.showPip,
                 pipAppPackage    = prefs[Keys.PIP_APP_PACKAGE]  ?: defaults.pipAppPackage,
+                carAppPackage    = prefs[Keys.CAR_APP_PACKAGE]  ?: defaults.carAppPackage,
                 radioPackage     = prefs[Keys.RADIO_PACKAGE]    ?: defaults.radioPackage,
                 onboardingCompleted = prefs[Keys.ONBOARDING_COMPLETED] ?: defaults.onboardingCompleted,
                 showVitals       = prefs[Keys.SHOW_VITALS]      ?: defaults.showVitals,
@@ -148,7 +154,9 @@ class SettingsRepository(private val context: Context) {
                         gson.fromJson<List<String>>(it, object : TypeToken<List<String>>() {}.type)
                     }.getOrNull()
                 } ?: listOfNotNull(prefs[stringPreferencesKey("autostart_package")]),
-                autostartDelay = prefs[Keys.AUTOSTART_DELAY] ?: defaults.autostartDelay
+                autostartDelay = prefs[Keys.AUTOSTART_DELAY] ?: defaults.autostartDelay,
+                vehicleImage = prefs[Keys.VEHICLE_IMAGE] ?: defaults.vehicleImage,
+                coverBackground = prefs[Keys.COVER_BACKGROUND] ?: defaults.coverBackground
             )
     }
 
@@ -188,11 +196,13 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.USE_GRADIENT]       = s.useGradient
             prefs[Keys.GRADIENT_END_COLOR] = s.gradientEndColor
             prefs[Keys.WALLPAPER_DIM]      = s.wallpaperDim
+            prefs[Keys.PIP_DPI]            = s.pipDpi.name
             prefs[Keys.SIDEBAR_POSITION]           = s.sidebarPosition.name
             prefs[Keys.BOTTOM_BAR_SHORTCUTS_RIGHT] = s.bottomBarShortcutsRight
             prefs[Keys.DAY_NIGHT_MODE]     = s.dayNightMode.name
             prefs[Keys.SHOW_PIP]           = s.showPip
             prefs[Keys.PIP_APP_PACKAGE]    = s.pipAppPackage
+            prefs[Keys.CAR_APP_PACKAGE]    = s.carAppPackage
             prefs[Keys.RADIO_PACKAGE]      = s.radioPackage
             prefs[Keys.ONBOARDING_COMPLETED] = s.onboardingCompleted
             prefs[Keys.SHOW_VITALS]        = s.showVitals
@@ -210,6 +220,8 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.SHOW_TRAFFIC]  = s.showTraffic
             prefs[Keys.AUTOSTART_PACKAGES_JSON] = gson.toJson(s.autostartPackages)
             prefs[Keys.AUTOSTART_DELAY] = s.autostartDelay
+            prefs[Keys.VEHICLE_IMAGE]   = s.vehicleImage
+            prefs[Keys.COVER_BACKGROUND] = s.coverBackground
     }
 
     suspend fun resetToDefaults() {

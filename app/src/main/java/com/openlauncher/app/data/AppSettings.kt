@@ -7,6 +7,7 @@ enum class ClockStyle { DIGITAL, ANALOG }
 enum class UnitSystem { METRIC, IMPERIAL }
 enum class DayNightMode { DARK, LIGHT, AUTO, SYSTEM }
 enum class SidebarPosition { LEFT, RIGHT, BOTTOM }
+enum class PipDpi { D160, D200, D240, D280, D320 }
 enum class GradientDirection { TOP_TO_BOTTOM, LEFT_TO_RIGHT, DIAGONAL, RADIAL }
 enum class MapProvider { OSM, GOOGLE }
 enum class MapType { ROADMAP, SATELLITE, HYBRID, TERRAIN }
@@ -26,9 +27,9 @@ enum class DefaultShortcutIcon {
     // Web / location
     GLOBE,
     // Nuevos
-    CUSTOM_MUSIC, CUSTOM_RADIO, CUSTOM_AAUTO, CUSTOM_PHONE, CUSTOM_VIDEO, CUSTOM_MAPS,
+    CUSTOM_MUSIC, CUSTOM_RADIO, CUSTOM_AAUTO, CUSTOM_PHONE, CUSTOM_VIDEO, CUSTOM_MAPS, CUSTOM_CONFIG, CUSTOM_FILES,
     // Nuevos originales
-    CUSTOM_MUSIC_ORI, CUSTOM_RADIO_ORI, CUSTOM_AAUTO_ORI, CUSTOM_PHONE_ORI, CUSTOM_VIDEO_ORI, CUSTOM_MAPS_ORI
+    CUSTOM_MUSIC_ORI, CUSTOM_RADIO_ORI, CUSTOM_AAUTO_ORI, CUSTOM_PHONE_ORI, CUSTOM_VIDEO_ORI, CUSTOM_MAPS_ORI, CUSTOM_CONFIG_ORI, CUSTOM_FILES_ORI
 }
 
 data class SoundPadConfig(
@@ -59,12 +60,13 @@ const val GRID_COLS = 6
 const val GRID_ROWS = 4
 
 data class WidgetConfig(
-    val id: String,          // "CLOCK" | "WEATHER" | "TELEMETRY" | "NOW_PLAYING"
+    val id: String,          // Unique identifier
     val gridX: Int,          // column 0..(GRID_COLS-1)
     val gridY: Int,          // row    0..(GRID_ROWS-1)
     val spanX: Int = 1,
     val spanY: Int = 1,
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    val appWidgetId: Int? = null // For Android system widgets
 )
 
 data class AppSettings(
@@ -80,7 +82,7 @@ data class AppSettings(
     val unitSystem: UnitSystem = UnitSystem.METRIC,
     val showWeather: Boolean = false,
     val showClock: Boolean = false,
-    val showTelemetry: Boolean = true,
+    val showTelemetry: Boolean = false,
     val showNowPlaying: Boolean = true,
     val shortcuts: List<ShortcutConfig> = defaultShortcuts(),
     val widgetLayout: List<WidgetConfig> = defaultWidgetLayout(),
@@ -89,13 +91,15 @@ data class AppSettings(
     val useGradient: Boolean = false,
     val gradientEndColor: Int = Color.Black.toArgb(),
     val wallpaperDim: Float = 0.55f,
+    val pipDpi: PipDpi = PipDpi.D240,
     val sidebarPosition: SidebarPosition = SidebarPosition.LEFT,
     val bottomBarShortcutsRight: Boolean = false,
     val showAltimeter: Boolean = false,
-    val showSpeedometer: Boolean = false,
+    val showSpeedometer: Boolean = true,
     val dayNightMode: DayNightMode = DayNightMode.DARK,
     val showPip: Boolean = false,
     val pipAppPackage: String = "",
+    val carAppPackage: String = "",
     // Head unit's radio app — mirrored & controlled via its MediaSession
     val radioPackage: String = "",
     val onboardingCompleted: Boolean = false,
@@ -113,7 +117,9 @@ data class AppSettings(
     val mapType: MapType = MapType.ROADMAP,
     val showTraffic: Boolean = false,
     val autostartPackages: List<String> = emptyList(),
-    val autostartDelay: Int = 2
+    val autostartDelay: Int = 2,
+    val vehicleImage: String = "",
+    val coverBackground: Boolean = false
 )
 
 fun defaultShortcuts() = listOf(
@@ -126,7 +132,7 @@ fun defaultShortcuts() = listOf(
 fun defaultWidgetLayout() = listOf(
     WidgetConfig("MAP",       gridX = 0, gridY = 0, spanX = 4, spanY = 4),
     WidgetConfig("NOW_PLAYING",     gridX = 4, gridY = 0, spanX = 2, spanY = 3),
-    WidgetConfig("TELEMETRY", gridX = 4, gridY = 3, spanX = 2, spanY = 1)
+    WidgetConfig("SPEEDOMETER", gridX = 4, gridY = 3, spanX = 2, spanY = 1)
 )
 
 fun AppSettings.activeWidgetIds(): Set<String> = buildSet {
@@ -140,6 +146,10 @@ fun AppSettings.activeWidgetIds(): Set<String> = buildSet {
     if (showTripTracker) add("TRIP_TRACKER")
     if (showSoundboard) add("SOUNDBOARD")
     if (showMap) add("MAP")
+    if (showPip) add("PIP")
+    
+    // Add any Android widgets that are currently in the layout and enabled
+    widgetLayout.forEach { if (it.enabled && it.appWidgetId != null) add(it.id) }
 }
 
 /**

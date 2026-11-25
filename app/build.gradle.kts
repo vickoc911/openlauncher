@@ -10,24 +10,41 @@ android {
     }
 
     defaultConfig {
+      //  applicationId  = "syu.widget.music"
         applicationId  = "com.openlauncher.app"
         minSdk         = 21
-        targetSdk      = 36
-        versionCode    = 8
-        versionName    = "1.1"
+        targetSdk      = 29
+        versionCode    = 15
+        versionName    = "1.5.0"
+    }
+
+    signingConfigs {
+        create("aosp") {
+            // Standard AOSP test keys configuration
+            // Requires 'platform.jks' in the app directory
+            storeFile = file("platform.jks")
+            storePassword = "android"
+            keyAlias = "fytplatform"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
         debug {
-            // Default signing config for normal device testing (restores app visibility)
+            signingConfig = signingConfigs.getByName("aosp")
         }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("aosp")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+    }
+
+    lint {
+        baseline = file("lint-baseline.xml")
     }
 
     compileOptions {
@@ -36,6 +53,7 @@ android {
     }
 
     buildFeatures {
+        aidl = true
         compose = true
     }
 }
@@ -50,6 +68,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("com.github.tiann:FreeReflection:3.1.0")
 
     // Compose
     implementation("androidx.compose.ui:ui")
@@ -68,9 +87,6 @@ dependencies {
 
     // Image loading
     implementation("io.coil-kt:coil-compose:2.7.0")
-
-    // Permissions
-    implementation("com.google.accompanist:accompanist-permissions:0.37.3")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
